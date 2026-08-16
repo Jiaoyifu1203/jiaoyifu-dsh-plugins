@@ -1,0 +1,8 @@
+{
+  "name": "jiaoyifu-track",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "description": "DSH 插件（jiaoyifu 系列），源码经 plugins/cordis.yml 以绝对路径注册，由 DSH loader 直接打包 TS。"
+}

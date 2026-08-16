@@ -1,0 +1,8 @@
+{
+  "name": "jiaoyifu-feishu",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "description": "DSH 插件（jiaoyifu 系列）：飞书机器人 → DeepSeek Harness 桥。飞书应用长连接模式收发私聊消息，转给本机 DSH agent 执行并回传结果。源码经 plugins/cordis.yml 以绝对路径注册，由 DSH loader 直接打包 TS。"
+}

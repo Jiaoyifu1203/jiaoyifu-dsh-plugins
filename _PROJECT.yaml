@@ -1,0 +1,12 @@
+project_id: deepseek-harness
+name: DeepSeek Harness + Pi
+kind: personal_tool
+status: active
+root: deepseek-harness
+authority: project scripts and config templates
+next_step: 本机终端执行 scripts/start-web.sh，浏览器打开 http://127.0.0.1:3080，Settings → Models 填 DeepSeek key
+knowledge_refs:
+  - AI知识体系/03-工具与方法/01-工具图谱/[L1] DeepSeek Harness与Pi速查-插件化Agent运行时.md
+  - AI知识体系/03-工具与方法/01-工具图谱/[L3] DeepSeek Harness与Pi安装SOP-V4双模型.md
+source: https://github.com/deepseek-ai/deepseek-harness
+task_id: TASK-20260813-4a5e4d6a91

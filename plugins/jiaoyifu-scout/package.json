@@ -1,0 +1,8 @@
+{
+  "name": "jiaoyifu-scout",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "description": "DSH 插件（jiaoyifu 系列）：v4-flash 轻量扫描代理，大任务中自动分派扫描/检索/核对类杂活。"
+}

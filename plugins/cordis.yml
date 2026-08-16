@@ -1,0 +1,53 @@
+# jiaoyifu 插件集 · 加载补丁
+# 由 scripts/start-web.sh 通过 `--patch` 自动加载，不要手动编辑绝对路径以外的内容。
+# 插件源码在 plugins/jiaoyifu-*/src/index.ts（TS 源文件直接注册，DSH loader 自动打包）。
+- insert:
+    - id: jiaoyifu-skill-router
+      name: "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness/plugins/jiaoyifu-skill-router/src/index.ts"
+      config:
+        autoInject: true
+        injectThreshold: 30
+        firstTurnThreshold: 20
+        maxInjectionsPerSession: 5
+        hintMaxChars: 260
+        topK: 3
+        # LLM 兜底重排：词面 Top1 得分 ≤ 阈值时，用一次廉价模型调用重排 Top-8（结果缓存）
+        llmFallback: true
+        llmFallbackThreshold: 30
+        llmProvider: "deepseek-official"
+        llmModel: "deepseek-v4-flash"
+        llmTimeoutMs: 20000
+    - id: jiaoyifu-token-doctor
+      name: "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness/plugins/jiaoyifu-token-doctor/src/index.ts"
+      config:
+        warnBudget: 45000
+    - id: jiaoyifu-track
+      name: "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness/plugins/jiaoyifu-track/src/index.ts"
+    - id: jiaoyifu-vision
+      name: "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness/plugins/jiaoyifu-vision/src/index.ts"
+      config:
+        # 任选一个 OpenAI 兼容视觉端点；key 走环境变量 VISION_API_KEY（不进仓库）
+        endpoint: ""
+        model: ""
+        apiKeyEnv: "VISION_API_KEY"
+    - id: jiaoyifu-scout
+      name: "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness/plugins/jiaoyifu-scout/src/index.ts"
+      config:
+        # v4-flash 轻量扫描代理：大任务中的扫描/检索/核对杂活自动分派给它
+        provider: "spawn"
+        llmProvider: "deepseek-official"
+        model: "deepseek-v4-flash"
+        maxTokens: 4096
+        toolName: "scout"
+        autoGuidance: true
+    - id: jiaoyifu-feishu
+      name: "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness/plugins/jiaoyifu-feishu/src/index.ts"
+      config:
+        # 飞书机器人 → DSH 桥（接替 OpenClaw 飞书通道，同一个自建应用、长连接模式）
+        # App Secret 只走环境变量 FEISHU_APP_SECRET（scripts/start-web.sh 自动加载 plugins/feishu.env）
+        appId: "cli_a9337098af78dbcd"
+        appSecretEnv: "FEISHU_APP_SECRET"
+        # agent 工作目录（飞书任务的 cwd）
+        workspaceDir: "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness"
+        # 只回私聊（p2p），群聊忽略；与 OpenClaw 原 dm-only 策略一致
+        allowedChatTypes: ["p2p"]
