@@ -30,4 +30,5 @@ if [ -f "$ROOT/plugins/cordis.yml" ]; then
   PATCH_FLAGS=(--patch "$ROOT/plugins/cordis.yml")
 fi
 
-exec npx --yes @deepseek-ai/dsh web "${PATCH_FLAGS[@]}" "$@"
+# 注意：dsh rc.6 的 `web` 子命令不接受父级 --patch，必须用 `--profile web` 形式
+exec npx --yes @deepseek-ai/dsh --profile web "${PATCH_FLAGS[@]}" "$@"

@@ -4,7 +4,7 @@ DeepSeek 官方 agent 运行时（`dsh`）和官方推荐的终端 harness（Pi�
 
 ## jiaoyifu 插件集（本仓库自研，升级自开源生态）
 
-`scripts/start-web.sh` 启动时自动通过 `--patch plugins/cordis.yml` 加载 4 个 TS 插件 + 1 个升级技能。详见 [plugins/README.md](plugins/README.md)。
+`scripts/start-web.sh` 启动时自动通过 `--patch plugins/cordis.yml` 加载 8 个 TS 插件 + 2 个技能（另含 grok CLI ACP 桥配置）。详见 [plugins/README.md](plugins/README.md)。
 
 | 插件 | 能力 |
 |---|---|
@@ -14,13 +14,18 @@ DeepSeek 官方 agent 运行时（`dsh`）和官方推荐的终端 harness（Pi�
 | `jiaoyifu-vision` | 多模态补充：`vision_describe` / `vision_ocr` / `vision_compare` / `image_info`（端点配 `plugins/cordis.yml`，key 走 `VISION_API_KEY` 环境变量） |
 | `jiaoyifu-scout` | v4-flash 轻量扫描代理：`scout` 工具把扫描/检索/核对类杂活分派给廉价子代理，主模型 token 留给核心决策 |
 | `jiaoyifu-feishu` | 飞书机器人 → DSH 桥：私聊转发给本机 agent、回复回传飞书、每用户独立会话（Secret 走 FEISHU_APP_SECRET，不进仓库） |
+| `jiaoyifu-studio` | 自媒体内容工作台（复刻 Oil Creator 笔记）：内容库目录规范 + `content_*` 工具 + `/content` 绑定上下文 + 同源面板 http://127.0.0.1:3080/jiaoyifu/studio（左列表 / 五 Tab / 平台卡） |
+| `dsh-model-agent` | 模型可切换全权委派：`model_agent` 整包委派，三档执行模型（grok 登录账户 ACP / v4-flash / v4-pro）；首次选定落盘沿用、对话可换；配套 `grok-acp-provider` 桥（无需 API key） |
 | `jiaoyifu-ui-design`（SKILL） | UI 设计工作台：风格库 → HTML 高保真 → 10 条美感门禁 |
+| `dsh-model-agent-delegation`（SKILL） | 委派组合分工协议：子代理干活、插件环节父代理代办、模型选定/沿用/切换路径 |
 
 已有技能库接入（一次性）：`./scripts/link-skills.sh` 把 `~/.cc-switch/skills` + `~/.claude/skills` 全部链接进 `~/.dsh/skills`（当前 138 个）。新增技能后重跑该脚本即可。
 
 ## 部署 dsh Web UI（官方入口）
 
-在本机终端执行，不要克隆源码仓：
+**最省事：Finder 里双击 `启动DeepSeekHarness.command`** —— 自动开终端、启动服务、就绪后弹出浏览器（默认 `http://127.0.0.1:3080`）。关闭该终端窗口即停止服务。
+
+或者在本机终端执行，不要克隆源码仓：
 
 ```bash
 cd "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness"
@@ -28,7 +33,9 @@ chmod +x scripts/start-web.sh
 ./scripts/start-web.sh
 ```
 
-等价命令：`npx --yes @deepseek-ai/dsh web`
+等价命令（加载插件集时不能用 `dsh web --patch`，rc.6 会报 unknown option）：
+
+`npx --yes @deepseek-ai/dsh --profile web --patch plugins/cordis.yml`
 
 浏览器打开打印出来的地址，默认 `http://127.0.0.1:3080`。然后：
 
@@ -51,7 +58,8 @@ Pi 的 `/model` 只显示已登录厂商。DeepSeek 用 `/login` → DeepSeek �
 
 | 目的 | 命令 |
 |---|---|
-| 打开 dsh Web UI | `./scripts/start-web.sh`，默认 `http://127.0.0.1:3080` |
+| 打开 dsh Web UI（双击版） | Finder 双击 `启动DeepSeekHarness.command` |
+| 打开 dsh Web UI（终端版） | `./scripts/start-web.sh`，默认 `http://127.0.0.1:3080` |
 | 打开 Pi | 进任意项目目录后执行 `pi`，`/model` 选 V4 Pro 或 V4 Flash |
 | 无界面跑一条 | `npx --yes @deepseek-ai/dsh --profile headless "任务"` |
 

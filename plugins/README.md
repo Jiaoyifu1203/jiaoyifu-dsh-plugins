@@ -1,9 +1,10 @@
 # jiaoyifu 插件集（DSH）
 
 为 DeepSeek Harness 定制升级的精简插件集 —— 每个插件都基于开源生态里已验证的方案
-**升级开发**而来，统一 `jiaoyifu-` 命名，默认零外部依赖、零 UI 构建、密钥只走环境变量。
+**升级开发**而来，默认零外部依赖、零 UI 构建、密钥只走环境变量。
+自用插件统一 `jiaoyifu-` 命名；对外分享的独立插件用 `dsh-` 前缀（首个：`dsh-model-agent`）。
 
-## 组成（6 个 TS 插件 + 1 个升级技能）
+## 组成（8 个 TS 插件 + 1 个 grok ACP 桥 + 2 个技能）
 
 | 插件 | 升级自 | 干什么 |
 |---|---|---|
@@ -13,11 +14,14 @@
 | `jiaoyifu-vision` | dsh-vision-router / modlens | **DeepSeek 多模态补充**：`vision_describe` / `vision_ocr` / `vision_compare` 走任意 OpenAI 兼容视觉端点 + `image_info` 本地零 token 解析 |
 | `jiaoyifu-scout` | dsh-subagent-tools | **v4-flash 轻量扫描代理**：`scout` 工具把扫描/检索/批量核对类杂活分派给廉价子代理（只读工具集 read/glob/grep/bash/web_search），主模型 token 留给核心决策；自动分派指引段注入 system prompt |
 | `jiaoyifu-feishu` | dsh-feishu-notify / OpenClaw 飞书通道 | **飞书机器人 → DSH 桥**：私聊消息转发给本机 DSH agent（同模型/技能/插件/工具），回复回传飞书；每用户独立会话、落盘 resume、/reset 重置；长连接模式无需公网；Secret 只走 FEISHU_APP_SECRET 环境变量 |
+| `jiaoyifu-studio` | Oil Creator 内容工作台笔记（本地目录 + 五 Tab + /content 绑定） | **自媒体内容工作台**：内容库目录规范（topic/script/subs/article/cover/video + meta.json）、`content_*` 七工具、`/content` 斜杠把当前期绑进会话上下文（pre-step 每轮注入）、同源工作台面板 `/jiaoyifu/studio`（左内容列表 / 概览·视频·脚本·字幕·文章五 Tab / 五平台状态卡）；发布铁律只写草稿 |
+| `dsh-model-agent` | 自研（dsh-tool-subagent 的 toolName 思路 + ACP 桥） | **模型可切换全权委派**：`model_agent` 工具整包委派任务，执行模型三档（grok 登录账户 ACP / deepseek-v4-flash / deepseek-v4-pro，后两档拥有 harness 全部工具）；首次选定落盘 `~/.dsh/model-agent.json` 沿用、每次委派报模型、对话可换（`model_agent_config`）；配套 `grok-acp-provider`（官方 `dsh-subagent-acp` 包）把 grok CLI 登录账户注册为子代理提供方，无需 API key |
 | `jiaoyifu-ui-design`（SKILL） | frontend-design / ui-ux-pro-max / huashu-design | **UI 设计工作台**：风格库 → HTML 高保真 → 10 条美感门禁 |
+| `dsh-model-agent-delegation`（SKILL） | 自研 | **委派组合分工协议**：grok 子代理负责读文件/跑命令/调研/实现，DSH 插件工具环节由父代理代办；模型选定/沿用/切换的完整操作路径 |
 
 ## 安装（本机，共 3 步）
 
-> 注意：`cordis.yml` 里的插件路径是本机绝对路径（DSH loader 要求），换机器/换目录后需把 6 处 `name:` 路径改掉再启动。
+> 注意：`cordis.yml` 里的插件路径是本机绝对路径（DSH loader 要求），换机器/换目录后需把 8 处 `name:` 路径改掉再启动。
 
 ```bash
 cd "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness"
@@ -40,18 +44,25 @@ cd "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness"
 3. 发一个具体任务（如「帮我写小红书笔记」）→ 首轮自动出现【技能路由提示】。
 4. 说「审计一下 token」→ `token_audit` 报告。
 5. 粘贴/给一张图片路径 → `vision_describe`（需已配端点）。
-6. 浏览器 Settings → Plugins 里能看到 4 个 jiaoyifu 插件。
+6. 浏览器 Settings → Plugins 里能看到 7 个 jiaoyifu 插件。
+7. 浏览器打开 `http://127.0.0.1:3080/jiaoyifu/studio` 看到内容工作台面板（新建一期 → 五 Tab 可用）。
+8. DSH 会话里发 `/content <slug>` → 提示已绑定，后续对话自动带本期上下文。
 
 ## 目录结构
 
 ```
 plugins/
   cordis.yml                  # 加载补丁（start-web.sh 自动 --patch）
+  feishu.env                  # 飞书 App Secret（gitignore，start-web.sh 自动加载）
   jiaoyifu-skill-router/      # 核心：分类 + 路由
     src/{index,taxonomy,router,persist}.ts
   jiaoyifu-token-doctor/      # token 审计
   jiaoyifu-track/             # 项目管理
   jiaoyifu-vision/            # 多模态桥
+  jiaoyifu-scout/             # v4-flash 扫描代理
+  jiaoyifu-feishu/            # 飞书机器人 → DSH 桥
+  jiaoyifu-studio/            # 自媒体内容工作台（内容库 + /content 绑定 + 同源面板）
+    src/{index,store,panel}.ts
 skills/
   jiaoyifu-ui-design/         # UI 设计工作台（SKILL.md）
 scripts/
@@ -62,7 +73,8 @@ scripts/
 ## 设计约定（jiaoyifu 铁律）
 
 - **插件不想太多**：一个痛点一个插件；能用 Markdown 说清的不写 TS（所以 UI 设计是 SKILL 不是插件）。
+- **零 UI 构建**：需要界面的插件走 `ctx.webServer` 路由 + 内联 HTML（`jiaoyifu-studio/src/panel.ts` 是模板字符串，无打包步骤；面板 JS 内禁用反引号与 `${`），不引入前端工具链。
 - **零 token 确定性优先**：分类/路由/审计全部本地计算，不额外调模型。
 - **密钥只走环境变量**：不进仓库、不进 cordis.yml。
-- **数据落盘 ~/.dsh**：`skill-catalog.{json,md}`、`token-stats.json`、`track.json`，跨会话可查。
+- **数据落盘 ~/.dsh**：`skill-catalog.{json,md}`、`token-stats.json`、`track.json`、`content/`、`studio-bind.json`，跨会话可查。
 - **升级不重造**：每个插件 README/头部注释标明升级自哪个开源项目。

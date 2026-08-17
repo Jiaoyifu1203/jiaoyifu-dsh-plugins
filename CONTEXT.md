@@ -2,6 +2,61 @@
 
 状态：Pi 已通（/login DeepSeek 后 V4 可选）。dsh 走官方 `npx @deepseek-ai/dsh web`，启动脚本是 `scripts/start-web.sh`。不克隆源码仓。
 
+## 2026-08-17 交互约定：全权委派 = model_agent（模型可切换，组合分工操作路径）
+
+- 触发：用户说「用 grok agent 完成任务」「交给子代理」「全权委托」= 任务**全部**交给
+  `model_agent` 子代理执行：读取、理解、调研、实现、验证、交付都由它做；父代理不拆子任务、不抢着做。
+- 执行模型（首次选定后落盘 `~/.dsh/model-agent.json` 沿用，对话可换）：
+  - `grok`：ACP 桥 grok CLI（登录账户 OAuth，无 API key）——原生工具集（bash/文件/web），继承工作目录；
+  - `deepseek-v4-flash`：spawn 子代理——harness 全部工具，快·省档；
+  - `deepseek-v4-pro`：spawn 子代理——harness 全部工具，主模型档。
+- 模型协议：首次委派前用 ask_user_question 让用户选定（未配置时）；每次委派前一句话明确本次执行模型；
+  沿用上次配置；用户说「换 XX 模型」→ `model_agent_config {model}` 或委派时传 `model` 参数（成为新默认）。
+- 组合分工（铁律）：
+  - **model_agent 子代理**：读文件、跑命令、调研、写代码、实现、验证、交付；
+  - **父代理（deepseek）插件代办**：需要 DSH 插件工具
+    （content_*/track_*/vision_*/skill_*/scout/skill_route/skill_catalog 等）的环节一律父代理调用完成——
+    grok 子代理没有这些工具，不要让它去试；
+  - 父代理其余职责：写自包含交接 prompt（目标+路径+验收标准+分工声明）、接收结果、核对验收。
+- 标准操作路径（一次委托）：
+  1. 报模型（未配置先问）→ 2. 打包交接 → 3. 调 `model_agent`（前台 one-shot）整包执行
+  → 4. 父代理核对（未达标可二次委派）→ 5. 插件环节父代理补做 → 6. 合并交付用户。
+- 完整协议已落技能 `skills/dsh-model-agent-delegation/SKILL.md`
+  （link-skills.sh 链接后，skill-router 遇「用 grok agent / 全权委托 / 换模型」自动路由）。
+- 单步小活（读个文件/改一行代码）不触发委派，直接做。
+
+## 2026-08-17 grok 接入演进：临时补丁 → cordis.yml 合并 → dsh-model-agent 插件
+
+- 事故：`grok_agent` 曾是 `~/dsh-grok.patch.yml` 临时补丁，单独 `--patch` 启动时才有；
+  改用 start-web.sh 重启后补丁没带上 → `Error: unknown tool "grok_agent"`（2026-08-17 11:53 连续两次）。
+- 第一版修复：两段并入 `plugins/cordis.yml`（grok-acp-provider + grok-subagent-tool）。
+- 第二版（现役）：委派升级为模型可切换插件 `plugins/dsh-model-agent/src/index.ts`，
+  cordis.yml 保留 grok-acp-provider（grok 档后端），grok-subagent-tool 由插件取代：
+  - 工具 `model_agent`：整包委派，模型解析顺序 = 参数 model → 落盘默认 → 首次引导用户选定；
+  - 工具 `model_agent_config`：查询/设置默认模型（对话切换）；
+  - 落盘 `~/.dsh/model-agent.json`（服务器进程写，不受会话沙箱限制）。
+- 能力边界（ACP 固有）：grok 子进程自带原生工具、继承工作目录，但 DSH 插件工具宿主侧独占；
+  flash/pro（spawn）子代理拥有 harness 全部工具。模型与权限在 `~/.grok/config.toml` 调。
+- 生效：重启 `./scripts/start-web.sh` + 跑一次 `./scripts/link-skills.sh`（收录新委派技能）。
+  旧 `~/dsh-grok.patch.yml` 已无用，可删。
+- 备选（未采用）：spawn 子代理 + grok 模型 provider 可给 grok 大脑配全部 47 工具，需 xAI API key（用户明确不用）。
+
+## 2026-08-16 jiaoyifu-studio 内容工作台（复刻 Oil Creator 笔记）
+
+- 来源：小红书视频笔记《DeepSeek Harness 爆改自媒体工作台》（作者 oil欧呦，工作台 Oil Creator，2026-08-16 发布）。
+  确证点：内容 Tab=本地目录映射、五 Tab（概览/视频/脚本/字幕/文章）、topic.md 选题卡、
+  /firm content 绑定当前期为上下文、平台卡（小红书/B站/抖音/视频号/公众号）+ 同步走本机不走 API、封面/字幕/发布 skill 全集成。
+- 本仓库实现 `plugins/jiaoyifu-studio/`（第 7 个插件）：
+  - 目录规范：`<contentRoot>/<slug>/{meta.json,topic.md,script.md,subs.srt,article.md,cover.*,video.mp4}`，
+    默认根 `~/.dsh/content`（cordis.yml contentRoot 可改）；meta 用 JSON（零依赖，不用 YAML）。
+  - 工具：content_list / content_get / content_new / content_write / content_status / content_bind / content_unbind。
+  - 斜杠：`/content <slug>` 绑定（落盘 ~/.dsh/studio-bind.json），`/studio` 给面板地址；
+    绑定后 `agent/pre-step` 每轮注入该期上下文（≤600 字）。
+  - 面板：`ctx.webServer.register` 挂 `/jiaoyifu/studio`（web profile host 服务；缺失时降级仅工具模式）。
+    内联 HTML（panel.ts 模板字符串，面板 JS 禁反引号/${}）；mp4 支持 Range 请求（拖动进度条）。
+  - 发布铁律：自动发布只写草稿（unpublished/draft/published），公开动作留给人；RPA 草稿发布二期。
+- 生效：本机终端重启 `./scripts/start-web.sh`（插件无热加载）。
+
 ## 2026-08-15 jiaoyifu 插件集 v0.1（本仓库自研，升级自开源生态）
 
 - 6 个 TS 插件（`plugins/jiaoyifu-*`，经 `plugins/cordis.yml` --patch 加载）：
@@ -67,7 +122,15 @@
 - 2026-08-14：本机 `pi` 报错找不到 `@earendil-works/pi-coding-agent`。原因是先装了已弃用的 `@mariozechner/pi-coding-agent@0.73.0`，而 `pi-subagents` 的 peer 已切到新包名。修复：卸旧装新到 `@earendil-works/pi-coding-agent@0.84.1`。
 - 沙箱验收（写在会话 HOME，不是你的 Mac 家目录）：`pi --version` = 0.73.1；`pi --list-models deepseek` 列出 V4 Pro / V4 Flash；`pi install` 装上两个包；`dsh --help` 可跑。系统 npm 全局目录不可写，必须 `prefix=$HOME/.local`。
 
+## 2026-08-16 OpenClaw 退役 + 飞书桥生效要点
+
+- OpenClaw 全量退役：launchd 服务 `ai.openclaw.gateway` 已停；`~/.openclaw`、全局 npm 包（openclaw/clawhub）、home 脚本 openclaw-*.sh、plist 已移入废纸篓（命名 `*.openclaw-retired-20260816-103443`，Finder 可恢复）。
+- 飞书通道迁移到 DSH：`jiaoyifu-feishu` 复用原 OpenClaw 的飞书自建应用（`cli_a9337098af78dbcd`，长连接模式），无需改飞书控制台。冒烟已验证「飞书长连接已启动」。
+- ⚠️ 踩坑：dsh rc.6 的 `web` 子命令不接受父级 `--patch`（报 unknown option），必须 `npx --yes @deepseek-ai/dsh --profile web --patch plugins/cordis.yml`。start-web.sh 已改为此形式；此前 `dsh web --patch` 写法插件实际没加载。
+- 插件新运行时依赖：`@deepseek-ai/dsh-agent`、`@deepseek-ai/dsh-session`、`@larksuiteoapi/node-sdk` 已装仓库根 package.json（沿契约 #1）。
+- 本机 npm 全局缓存有 root 文件（EPERM）：本次全部用 `--cache .tmp-tooling/npm-cache` 绕过；根治需 `sudo chown -R 501:20 /Users/gerryyin/.npm`（未代执行）。
+
 ## 边界
 
-- 这是实验运行时，不是第五生产端。任务总线、收尾门、SCOPE_KB 仍走 Desktop / Code / OpenClaw / Hermes。
+- 这是实验运行时，不是第五生产端。任务总线、收尾门、SCOPE_KB 仍走 Desktop / Code / Hermes（OpenClaw 已于 2026-08-16 退役）。
 - 密钥只走 `DEEPSEEK_API_KEY`，不写进仓库。

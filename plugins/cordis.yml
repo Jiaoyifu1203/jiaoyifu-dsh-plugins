@@ -43,7 +43,7 @@
     - id: jiaoyifu-feishu
       name: "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness/plugins/jiaoyifu-feishu/src/index.ts"
       config:
-        # 飞书机器人 → DSH 桥（接替 OpenClaw 飞书通道，同一个自建应用、长连接模式）
+        # 飞书总控台：全任务监管（/tasks + 完成推送）+ 随时介入（/steer）+ 审批接管
         # App Secret 只走环境变量 FEISHU_APP_SECRET（scripts/start-web.sh 自动加载 plugins/feishu.env）
         appId: "cli_a9337098af78dbcd"
         appSecretEnv: "FEISHU_APP_SECRET"
@@ -51,3 +51,43 @@
         workspaceDir: "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness"
         # 只回私聊（p2p），群聊忽略；与 OpenClaw 原 dm-only 策略一致
         allowedChatTypes: ["p2p"]
+        # 监管/审批管理员 open_id；留空 = 第一个私聊用户自动绑定（落盘 ~/.dsh/feishu-admin.json）
+        adminOpenIds: []
+        # 任务结束/出错自动推送飞书；任务开始推送默认关（易刷屏）
+        notifyTurnEnd: true
+        notifyTurnStart: false
+        # 进度推送：运行超过 60s 开始报，之后每 3 分钟一条（含最近工具名）
+        progressFirstAfterMs: 60000
+        progressIntervalMs: 180000
+        # 审批最长等待 30 分钟，超时 fail-closed
+        approvalTimeoutMs: 1800000
+    - id: jiaoyifu-studio
+      name: "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness/plugins/jiaoyifu-studio/src/index.ts"
+      config:
+        # 内容工作台（复刻 Oil Creator）：内容库目录 + /content 绑定 + /jiaoyifu/studio 面板
+        # contentRoot 留空 = ~/.dsh/content；也可指向已有内容目录（目录即数据库）
+        contentRoot: ""
+        panelPath: "/jiaoyifu/studio"
+        maxInjectChars: 600
+    # grok 子代理提供方：grok CLI（登录账户 OAuth），model_agent 的 grok 档后端
+    - id: grok-acp-provider
+      name: '@deepseek-ai/dsh-subagent-acp'
+      config:
+        providerName: grok
+        command: '/Users/gerryyin/.grok/bin/grok'
+        args: ['--no-auto-update', '--always-approve', 'agent', 'stdio']
+        # ACP 子进程的权限请求一律自动批准（harness 侧兜底，CLI 侧另有 --always-approve）
+        permission: allow
+        env:
+          GROK_HOME: '/Users/gerryyin/.grok'
+    # model_agent：模型可切换的全权委派工具（grok / deepseek-v4-flash / deepseek-v4-pro）
+    # 首次委派时由父代理问用户选定模型，落盘 ~/.dsh/model-agent.json 沿用；对话可换。
+    # 原 grok-subagent-tool（固定 grok_agent 工具）已由本插件取代。
+    - id: dsh-model-agent
+      name: "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness/plugins/dsh-model-agent/src/index.ts"
+      config:
+        toolName: model_agent
+        # 配置落盘位置；留空 = ~/.dsh/model-agent.json（服务器进程写，不受会话沙箱限制）
+        configPath: ""
+        # 首次默认模型；留空 = 首次调用时由父代理向用户确认后选定
+        defaultModel: ""
