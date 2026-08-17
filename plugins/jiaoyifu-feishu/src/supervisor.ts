@@ -32,8 +32,30 @@ function shortId(id: string): string {
   return tail.slice(0, 6)
 }
 
+/** 从会话事件里取第一条用户消息文本（任务名的主要来源）。 */
+function firstUserText(events: any[]): string {
+  for (const event of events) {
+    if (event.type !== 'user/message') continue
+    const blocks = event.data?.content ?? []
+    for (const block of blocks) {
+      if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
+        return block.text.trim()
+      }
+    }
+  }
+  return ''
+}
+
+/** 任务名：会话标题 > 首条用户消息（截断 24 字）> 会话短编号。 */
 function titleOf(agent: any): string {
-  return agent.session?.title ?? `会话 ${shortId(agent.session?.id ?? agent.id ?? '?')}`
+  const title = agent.session?.title
+  if (typeof title === 'string' && title.trim()) return title.trim()
+  const first = firstUserText(agent.session?.events ?? [])
+  if (first) {
+    const one = first.replace(/\s+/g, ' ').trim()
+    return one.length > 24 ? `${one.slice(0, 24)}…` : one
+  }
+  return `会话 ${shortId(agent.session?.id ?? agent.id ?? '?')}`
 }
 
 function cwdOf(agent: any): string {
