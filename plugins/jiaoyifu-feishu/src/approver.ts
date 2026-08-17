@@ -45,6 +45,20 @@ function shortOf(id: string): string {
   return (id.split('-').pop() ?? id).slice(0, 6)
 }
 
+/** 从会话事件里取第一条用户消息文本（任务名来源，与 supervisor.titleOf 同款）。 */
+function firstUserText(events: any[]): string {
+  for (const event of events) {
+    if (event.type !== 'user/message') continue
+    const blocks = event.data?.content ?? []
+    for (const block of blocks) {
+      if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
+        return block.text.trim()
+      }
+    }
+  }
+  return ''
+}
+
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (signal.aborted) {
@@ -140,7 +154,13 @@ export function createApprover(options: ApproverOptions): Approver {
       const agents = ctx.get('agents') as { list?: () => any[] } | undefined
       const list = agents?.list?.() ?? []
       const agent = list.find((item) => item?.session?.id === sessionId)
-      if (typeof agent?.session?.title === 'string' && agent.session.title) return agent.session.title
+      const title = agent?.session?.title
+      if (typeof title === 'string' && title.trim()) return title.trim()
+      const first = firstUserText(agent?.session?.events ?? [])
+      if (first) {
+        const one = first.replace(/\s+/g, ' ').trim()
+        return one.length > 24 ? `${one.slice(0, 24)}…` : one
+      }
     } catch { /* 读标题失败用短号 */ }
     return `会话 ${shortOf(sessionId)}`
   }
