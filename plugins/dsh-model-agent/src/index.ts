@@ -24,7 +24,7 @@ import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 
 export const name = 'dsh-model-agent'
-export const inject = ['tools', 'subagents', 'systemPrompt']
+export const inject = ['tools', 'subagents', 'systemPrompt', 'approval']
 
 interface ModelSpec {
   /** spawn = harness 内子代理（可带 agentOptions，全量工具）；acp = 外部 CLI 子进程 */
@@ -64,6 +64,8 @@ export interface Config {
   toolName?: string
   configPath?: string
   defaultModel?: string
+  /** 委派前是否走审批门（Web 弹窗 + 飞书镜像双端可见），默认 true */
+  requireApproval?: boolean
   models?: Record<string, ModelSpec>
 }
 
@@ -73,6 +75,8 @@ export const Config: Schema<Config> = Schema.object({
   configPath: Schema.string().default(''),
   /** 首次默认模型 key；留空 = 首次调用时由父代理向用户确认 */
   defaultModel: Schema.string().default(''),
+  /** 委派前是否走审批门（Web 弹窗 + 飞书镜像双端可见），默认 true */
+  requireApproval: Schema.boolean().default(true),
   models: Schema.dict(Schema.object({
     kind: Schema.string().default('spawn'),
     provider: Schema.string().required(),
@@ -85,6 +89,7 @@ export const Config: Schema<Config> = Schema.object({
 
 export function apply(ctx: Context, config: Config): void {
   const toolName = config.toolName ?? 'model_agent'
+  const requireApproval = config.requireApproval ?? true
   const models: Record<string, ModelSpec> = { ...DEFAULT_MODELS, ...(config.models ?? {}) }
   const configPath =
     config.configPath && String(config.configPath).trim() !== ''
@@ -143,6 +148,7 @@ export function apply(ctx: Context, config: Config): void {
       '模型可切换的全权委派工具：把自包含任务整包交给子代理执行，返回其最终结果。' +
       '执行模型从落盘默认配置解析；传 model 参数可指定（grok / deepseek-v4-flash / deepseek-v4-pro）并成为新默认。' +
       '未配置默认模型时，先 ask_user_question 让用户选定模型再调用。' +
+      '委派会先触发审批门（Web 弹窗 + 飞书镜像双端可见，需人工批准才执行），审批被拒/取消则本次不执行。' +
       'grok 子代理拥有 grok 原生工具（bash/文件/web，继承工作目录）；flash/pro 子代理拥有 harness 全部工具。',
     parameters: {
       prompt: { type: 'string', required: true, description: '完整的自包含任务（目标+上下文路径+验收标准；子代理看不到父对话）' },
@@ -181,6 +187,26 @@ export function apply(ctx: Context, config: Config): void {
             ? '请确认 plugins/cordis.yml 中 grok-acp-provider 已加载且 grok CLI 可用（启动日志无 "not registered yet"）。'
             : '请确认 dsh-base 的 spawn 提供方已加载（重启服务）。')
         )
+      }
+
+      // 委派审批门：整包委派会 spawn 子代理干真实活，先过审批（Web 弹窗 + 飞书镜像双端可见）
+      if (requireApproval) {
+        const approvalSvc = (ctx as any).approval
+        if (approvalSvc && typeof approvalSvc.request === 'function') {
+          const outcome = await approvalSvc.request({
+            agent: parent,
+            toolName: `${toolName}:${key}`,
+            reason: `全权委派：${spec.label} 执行「${String(args?.description ?? '').trim().slice(0, 80)}」`,
+            signal: exec.signal,
+          })
+          if (outcome !== 'allowed-once') {
+            const why =
+              outcome === 'cancelled' ? '审批已取消'
+                : outcome === 'rejected' ? '审批被拒绝'
+                  : '没有可用的审批通道（fail-closed）'
+            return `【委派未执行 · ${spec.label}】${why}。`
+          }
+        }
       }
 
       const base: any = {

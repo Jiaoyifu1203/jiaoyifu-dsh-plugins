@@ -65,6 +65,7 @@ npx --yes @deepseek-ai/dsh plugin --profile web add @deepseek-ai/dsh-subagent-ac
 | `toolName` | `model_agent` | 委派工具名 |
 | `configPath` | `~/.dsh/model-agent.json` | 模型默认配置落盘路径 |
 | `defaultModel` | 空 | 首次默认模型；空 = 首次委派时问用户 |
+| `requireApproval` | `true` | 委派前审批门（Web 弹窗 + 飞书镜像双端可见，批准才执行）；`false` 关闭 |
 | `models` | 内置三档 | 自定义模型表（kind: spawn/acp + provider + agentOptions） |
 
 ## 能力边界（ACP 档）
