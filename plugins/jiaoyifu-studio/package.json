@@ -1,0 +1,18 @@
+{
+  "name": "jiaoyifu-studio",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "description": "DSH 插件（jiaoyifu 系列）：内容工作台 + 视频产线。host 半 TS 由 DSH loader 直接加载；client 半手写 src/client.js 向 dsh-better-sidebar 注册侧边栏 Tab（缺失则静默不激活）。升级自 Oil Creator + MoneyPrinterTurbo。",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    }
+  }
+}

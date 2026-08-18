@@ -6,7 +6,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { SkillEntry } from './router'
+import type { SkillEntry } from './router.ts'
 
 export interface CatalogCategory {
   key: string

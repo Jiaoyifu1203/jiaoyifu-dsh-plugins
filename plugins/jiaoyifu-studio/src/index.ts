@@ -6,7 +6,7 @@
  *  2. 对话创作：content_* 工具 + /content 斜杠绑定「当前期」为会话上下文（agent/pre-step 注入）；
  *  3. 工作台面板：/jiaoyifu/studio 同源挂载（ctx.webServer 路由），
  *     左内容列表 + 五 Tab 详情（概览/视频/脚本/字幕/文章）+ 多平台状态卡；
- *  4. 发布铁律：自动发布默认只写草稿，公开动作留给人（本地 RPA 二期再做）。
+ *  4. 发布铁律：自动发布只生成发布包 / 填草稿，公开动作留给人（绝不点发布）。
  *
  * 升级自笔记作者演示的 Oil Creator 工作台（dsh-theme + 内容 Tab + /firm content），
  * 依 jiaoyifu 铁律改造：零 UI 构建（HTML 内联）、零外部依赖、数据落盘 ~/.dsh/content。
@@ -18,6 +18,8 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { buildInjectPayload } from './memory.ts'
+import { scheduleQc } from './qc.ts'
 import {
   PLATFORM_KEYS,
   PLATFORM_LABELS,
@@ -38,10 +40,12 @@ import {
   type EpisodeView,
   type PlatformKey,
 } from './store.ts'
+import * as video from './video.ts'
+import * as publish from './publish.ts'
 import { PANEL_HTML } from './panel.ts'
 
 export const name = 'jiaoyifu-studio'
-export const inject = ['tools', 'commands', 'webServer']
+export const inject = ['tools', 'commands', 'webServer', 'llm']
 
 export interface Config {
   /** 内容根目录；留空默认 ~/.dsh/content */
@@ -50,12 +54,38 @@ export interface Config {
   panelPath?: string
   /** 绑定上下文注入的最大字符数 */
   maxInjectChars?: number
+  /** 视频产线默认音色（留空自动探测本机中文音色） */
+  videoVoice?: string
+  /** 视频产线默认语速（80-400） */
+  videoRate?: number
+  /** 视频产线默认分辨率（竖屏 1080x1920） */
+  videoResolution?: string
+  /** 实验性 RPA 填草稿（默认关；仍不点发布） */
+  publishRpa?: boolean
+  /** 覆盖创作后台 URL，键为 xhs/bilibili/douyin/shipinhao/gzh */
+  publishUrls?: Partial<Record<PlatformKey, string>>
+  /** 被动质检（写 script/article 后异步跑，失败静默） */
+  qcEnabled?: boolean
+  qcProvider?: string
+  qcModel?: string
+  qcFallbackModel?: string
+  qcTimeoutMs?: number
 }
 
 export const Config: Schema<Config> = Schema.object({
   contentRoot: Schema.string().default(''),
   panelPath: Schema.string().default('/jiaoyifu/studio'),
   maxInjectChars: Schema.number().default(600),
+  videoVoice: Schema.string().default(''),
+  videoRate: Schema.number().default(190),
+  videoResolution: Schema.string().default('1080x1920'),
+  publishRpa: Schema.boolean().default(false),
+  publishUrls: Schema.dict(Schema.string()).default({}),
+  qcEnabled: Schema.boolean().default(true),
+  qcProvider: Schema.string().default('deepseek-official'),
+  qcModel: Schema.string().default('deepseek-v4-flash'),
+  qcFallbackModel: Schema.string().default('deepseek-v4-pro'),
+  qcTimeoutMs: Schema.number().default(15000),
 })
 
 const STATUS_EMOJI: Record<string, string> = {
@@ -234,7 +264,20 @@ export function apply(ctx: Context, config: Config): void {
       if (!meta) return `找不到「${args?.query}」。用 content_list 看现有期次。`
       const file = String(args?.file ?? '')
       if (!['topic', 'script', 'article', 'subs'].includes(file)) return `非法文件类型：${file}（可选 topic/script/article/subs）`
-      const path = await writeEpisodeFile(root, meta.slug, file as 'topic' | 'script' | 'article' | 'subs', String(args?.content ?? ''), args?.append === true)
+      const content = String(args?.content ?? '')
+      const path = await writeEpisodeFile(root, meta.slug, file as 'topic' | 'script' | 'article' | 'subs', content, args?.append === true)
+      scheduleQc({
+        enabled: config.qcEnabled !== false,
+        root,
+        slug: meta.slug,
+        file,
+        content,
+        provider: config.qcProvider || 'deepseek-official',
+        model: config.qcModel || 'deepseek-v4-flash',
+        fallbackModel: config.qcFallbackModel || 'deepseek-v4-pro',
+        timeoutMs: clampNum(config.qcTimeoutMs, 1000, 120000, 15000),
+        llm: (ctx as unknown as { llm?: { stream?: (req: unknown) => AsyncIterable<unknown> } }).llm,
+      })
       return `已写入 ${file}：${path}`
     },
   }))
@@ -305,6 +348,160 @@ export function apply(ctx: Context, config: Config): void {
         return '已解绑。'
       }
       return '当前会话没有绑定任何期次。'
+    },
+  }))
+
+  // ---------- 工具：视频生产流水线（产线概念升级自 MoneyPrinterTurbo，MIT） ----------
+
+  ctx.tools.register(defineTool({
+    name: 'video_probe',
+    description:
+      '探测本机视频产线能力（say TTS / afinfo / ffmpeg 合成）与可用中文音色列表；可选传 query 查某一期的产线阶段（文案/配音/字幕/分镜/成片）。',
+    parameters: {
+      query: { type: 'string', description: '可选：期次 slug 或标题关键词，查该期产线进度' },
+    },
+    output: { schema: { type: 'string' }, render: (_args: any, value: any) => [{ type: 'text', text: String(value) }] },
+    async execute(args: any) {
+      const p = await video.probe()
+      const lines = [
+        '## 视频产线能力探测',
+        '',
+        `- say（本机 TTS）：${p.say ? '✅' : '❌（需要 macOS）'}`,
+        `- afinfo（音频时长）：${p.afinfo ? '✅' : '❌'}`,
+        `- ffmpeg（合成）：${p.ffmpeg ? '✅' : '❌（brew install ffmpeg）'}`,
+        `- 默认中文音色：${p.defaultVoice || '（未探测到，配音时用系统默认）'}`,
+      ]
+      if (p.zhVoices.length) lines.push(`- 中文音色（前 8）：${p.zhVoices.slice(0, 8).map((v) => v.name).join('、')}`)
+      if (args?.query) {
+        const meta = await findEpisode(root, String(args.query))
+        if (meta?.video) {
+          const dir = safeItemDir(root, meta.slug)
+          const facts = dir ? await video.episodeVideoFacts(dir) : null
+          lines.push('', `《${meta.title}》产线：阶段 ${meta.video.stage ?? '未开始'} · ${meta.video.sentences ?? 0} 句 · ${meta.video.durationSec ?? 0}s` +
+            (facts ? ` · 配音文件 ${facts.voiceCount} 个 · 素材 ${facts.materialsCount} 张` : ''))
+        } else {
+          lines.push('', `（未找到「${args.query}」或该期尚未开始产线）`)
+        }
+      }
+      return lines.join('\n')
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'video_voice',
+    description:
+      '视频产线·配音：把某一期的 script.md 按句切成 mac 本机 TTS（say）音频，逐句测量时长并落盘 voice/。零 API 零费用；生成后可用 video_subs 出字幕。',
+    parameters: {
+      query: { type: 'string', required: true, description: '期次 slug 或标题关键词' },
+      voice: { type: 'string', description: '音色名（留空用默认中文音色；video_probe 可查列表）' },
+      rate: { type: 'number', description: '语速 80-400，默认 190' },
+    },
+    output: { schema: { type: 'string' }, render: (_args: any, value: any) => [{ type: 'text', text: String(value) }] },
+    async execute(args: any) {
+      const voice = String(args?.voice ?? '').trim() || config.videoVoice || ''
+      const rate = args?.rate !== undefined ? Number(args.rate) : config.videoRate
+      const result = await video.ttsEpisode(root, String(args?.query ?? ''), { voice: voice || undefined, rate })
+      return result.ok ? `${result.message}\n下一步：video_subs 生成字幕，或 video_compose 直接合成。` : `❌ ${result.error}`
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'video_subs',
+    description: '视频产线·字幕：按配音每句时长生成 SRT 时间轴，写入本期 subs.srt（面板字幕 Tab 可直接预览，与视频播放联动）。',
+    parameters: {
+      query: { type: 'string', required: true, description: '期次 slug 或标题关键词' },
+    },
+    output: { schema: { type: 'string' }, render: (_args: any, value: any) => [{ type: 'text', text: String(value) }] },
+    async execute(args: any) {
+      const result = await video.buildSrt(root, String(args?.query ?? ''))
+      return result.ok ? `${result.message}\n下一步：video_storyboard 出分镜，或 video_compose 直接合成。` : `❌ ${result.error}`
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'video_storyboard',
+    description:
+      '视频产线·分镜：按 script.md 切句生成 storyboard.md（镜号/台词/时长/关键词/素材槽），零 API。时长优先用配音实测。',
+    parameters: {
+      query: { type: 'string', required: true, description: '期次 slug 或标题关键词' },
+    },
+    output: { schema: { type: 'string' }, render: (_args: any, value: any) => [{ type: 'text', text: String(value) }] },
+    async execute(args: any) {
+      const meta = await findEpisode(root, String(args?.query ?? ''))
+      if (!meta) return `找不到「${args?.query}」。用 content_list 看现有期次。`
+      const result = await video.buildStoryboard(root, meta.slug, { rate: config.videoRate })
+      return result.ok ? `${result.message}\n下一步：video_compose 按分镜合成（无分镜表则走旧轮播）。` : `❌ ${result.error}`
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'video_compose',
+    description:
+      '视频产线·合成：有 storyboard.md 则按分镜分段 concat；否则 materials/ 轮播（无则纯色底）+ 配音 + 可选 BGM + 可选烧字幕 -> video.mp4。需先 video_voice。',
+    parameters: {
+      query: { type: 'string', required: true, description: '期次 slug 或标题关键词' },
+      resolution: { type: 'string', description: '1080x1920（默认竖屏）/ 1920x1080 / 720x1280' },
+      burnSubs: { type: 'boolean', description: '是否烧录字幕，默认 true' },
+      withBgm: { type: 'boolean', description: '是否混入 bgm/ 背景音乐，默认 true（无 BGM 文件自动跳过）' },
+    },
+    output: { schema: { type: 'string' }, render: (_args: any, value: any) => [{ type: 'text', text: String(value) }] },
+    async execute(args: any) {
+      const result = await video.composeEpisode(root, String(args?.query ?? ''), {
+        resolution: String(args?.resolution ?? '') || config.videoResolution,
+        burnSubs: args?.burnSubs !== false,
+        withBgm: args?.withBgm !== false,
+      })
+      return result.ok ? `${result.message}\n可在面板 ${panelUrl()} 视频 Tab 预览；发布前记得人工确认（铁律：只写草稿）。` : `❌ ${result.error}`
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'publish_pack',
+    description:
+      '按平台规格生成发布包（publish/<platform>.md）。默认五平台：xhs/bilibili/douyin/shipinhao/gzh。只生成草稿包，不发布。',
+    parameters: {
+      query: { type: 'string', required: true, description: '期次 slug 或标题关键词' },
+      platforms: { type: 'string', description: '逗号分隔平台，默认五平台全量' },
+    },
+    output: { schema: { type: 'string' }, render: (_args: any, value: any) => [{ type: 'text', text: String(value) }] },
+    async execute(args: any) {
+      const result = await publish.packEpisode(root, String(args?.query ?? ''), args?.platforms)
+      if (!result.ok) return `❌ ${result.error}`
+      const lines = [`已生成发布包（源：${result.source}）：`, '']
+      for (const it of result.items ?? []) {
+        lines.push(`- ${it.platform}：${it.path}《${it.title}》${it.truncated ? '（已按上限截断）' : ''}`)
+      }
+      lines.push('', '铁律：这只是草稿包。公开发布请人在平台后台完成。')
+      return lines.join('\n')
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'publish_draft',
+    description:
+      '把发布包填进平台创作后台：open=打开网页+剪贴板；rpa=实验性填输入框（默认关）。绝不点击发布/提交。',
+    parameters: {
+      query: { type: 'string', required: true, description: '期次 slug 或标题关键词' },
+      platform: { type: 'string', required: true, description: 'xhs / bilibili / douyin / shipinhao / gzh' },
+      mode: { type: 'string', description: 'rpa | open | auto，默认 auto' },
+    },
+    output: { schema: { type: 'string' }, render: (_args: any, value: any) => [{ type: 'text', text: String(value) }] },
+    async execute(args: any) {
+      const result = await publish.draftEpisode(
+        root,
+        String(args?.query ?? ''),
+        String(args?.platform ?? ''),
+        typeof args?.mode === 'string' ? args.mode : 'auto',
+        { publishRpa: config.publishRpa, publishUrls: config.publishUrls },
+      )
+      const r = result.result
+      if (!r.ok) return `❌ ${r.error ?? '填草稿失败'}（platform=${result.platform} mode=${result.mode}）`
+      return [
+        r.message ?? '草稿已处理',
+        `platform=${result.platform}`,
+        `mode=${result.mode}`,
+        result.browserLeftOpen ? 'browserLeftOpen=true' : '',
+      ].filter(Boolean).join('\n')
     },
   }))
 
@@ -394,13 +591,7 @@ export function apply(ctx: Context, config: Config): void {
   })
 
   function buildBindHint(ep: EpisodeView, max: number): string {
-    const files = ['topic.md', 'script.md', 'subs.srt', 'article.md', 'meta.json'].join('/')
-    const text =
-      `【内容工作台】当前绑定本期：《${ep.meta.title}》（${ep.meta.slug}，状态：${STATUS_LABELS[ep.meta.status]}）。` +
-      `目录：${ep.dir}（文件：${files}）。` +
-      `平台：${platformLine(ep.meta)}。` +
-      '围绕本期写脚本/封面/字幕/文章，直接读写该目录文件或调用 content_* 工具；状态与发布用 content_status（公开发布前人工确认）。'
-    return text.length <= max ? text : `${text.slice(0, max - 1)}…`
+    return buildInjectPayload(ep, max).text
   }
 
   // ---------- 工作台面板（同源路由 /jiaoyifu/studio） ----------
@@ -526,6 +717,11 @@ export function apply(ctx: Context, config: Config): void {
             hasVideo: ep.hasVideo,
             coverUrl: ep.hasCover ? `${panelPath}/api/media?slug=${encodeURIComponent(ep.meta.slug)}&file=cover.${ep.coverExt}` : '',
             videoUrl: ep.hasVideo ? `${panelPath}/api/media?slug=${encodeURIComponent(ep.meta.slug)}&file=video.mp4` : '',
+            video: ep.meta.video ?? null,
+            videoFacts: await video.episodeVideoFacts(ep.dir),
+            publishFacts: await publish.episodePublishFacts(root, ep.meta.slug),
+            memory: ep.meta.memory ?? [],
+            qc: ep.meta.qc ?? null,
           },
         })
         return
@@ -587,8 +783,118 @@ export function apply(ctx: Context, config: Config): void {
           sendJson(res, 400, { ok: false, error: '非法 file' })
           return
         }
-        const path = await writeEpisodeFile(root, slug, file as 'topic' | 'script' | 'article' | 'subs', String(body?.content ?? ''), body?.append === true)
+        const content = String(body?.content ?? '')
+        const path = await writeEpisodeFile(root, slug, file as 'topic' | 'script' | 'article' | 'subs', content, body?.append === true)
+        scheduleQc({
+          enabled: config.qcEnabled !== false,
+          root,
+          slug,
+          file,
+          content,
+          provider: config.qcProvider || 'deepseek-official',
+          model: config.qcModel || 'deepseek-v4-flash',
+          fallbackModel: config.qcFallbackModel || 'deepseek-v4-pro',
+          timeoutMs: clampNum(config.qcTimeoutMs, 1000, 120000, 15000),
+          llm: (ctx as unknown as { llm?: { stream?: (req: unknown) => AsyncIterable<unknown> } }).llm,
+        })
         sendJson(res, 200, { ok: true, path })
+        return
+      }
+
+      if (method === 'GET' && rest === '/api/video/status') {
+        const slug = url.searchParams.get('slug') ?? ''
+        const p = await video.probe()
+        let stage: unknown = null
+        let facts: unknown = null
+        if (slug) {
+          const meta = await findEpisode(root, slug)
+          if (meta) {
+            stage = meta.video ?? null
+            const dir = safeItemDir(root, meta.slug)
+            if (dir) facts = await video.episodeVideoFacts(dir)
+          }
+        }
+        sendJson(res, 200, {
+          ok: true,
+          probe: { say: p.say, afinfo: p.afinfo, ffmpeg: p.ffmpeg },
+          defaultVoice: p.defaultVoice,
+          zhVoices: p.zhVoices.map((v) => v.name),
+          stage,
+          facts,
+        })
+        return
+      }
+
+      if (method === 'POST' && (rest === '/api/video/voice' || rest === '/api/video/subs' || rest === '/api/video/storyboard' || rest === '/api/video/compose')) {
+        const body = JSON.parse(await readBody(req))
+        const slug = String(body?.slug ?? '')
+        if (!slug) {
+          sendJson(res, 400, { ok: false, error: '缺少 slug' })
+          return
+        }
+        const result =
+          rest === '/api/video/voice'
+            ? await video.ttsEpisode(root, slug, {
+                voice: (typeof body?.voice === 'string' && body.voice ? body.voice : config.videoVoice) || undefined,
+                rate: body?.rate !== undefined ? Number(body.rate) : config.videoRate,
+              })
+            : rest === '/api/video/subs'
+              ? await video.buildSrt(root, slug)
+              : rest === '/api/video/storyboard'
+                ? await video.buildStoryboard(root, slug, { rate: config.videoRate })
+                : await video.composeEpisode(root, slug, {
+                    resolution: String(body?.resolution ?? '') || config.videoResolution,
+                    burnSubs: body?.burnSubs !== false,
+                    withBgm: body?.withBgm !== false,
+                  })
+        sendJson(res, result.ok ? 200 : 400, result)
+        return
+      }
+
+      if (method === 'GET' && rest === '/api/publish/status') {
+        const slug = url.searchParams.get('slug') ?? ''
+        if (!slug) {
+          sendJson(res, 400, { ok: false, error: '缺少 slug' })
+          return
+        }
+        sendJson(res, 200, {
+          ok: true,
+          slug,
+          publishFacts: await publish.episodePublishFacts(root, slug),
+          publishRpa: config.publishRpa === true,
+          playwright: publish.hasPlaywright(),
+        })
+        return
+      }
+
+      if (method === 'POST' && rest === '/api/publish/pack') {
+        const body = JSON.parse(await readBody(req))
+        const slug = String(body?.slug ?? '')
+        if (!slug) {
+          sendJson(res, 400, { ok: false, error: '缺少 slug' })
+          return
+        }
+        const result = await publish.packEpisode(root, slug, body?.platforms)
+        sendJson(res, result.ok ? 200 : 400, result)
+        return
+      }
+
+      if (method === 'POST' && rest === '/api/publish/draft') {
+        const body = JSON.parse(await readBody(req))
+        const slug = String(body?.slug ?? '')
+        const platform = String(body?.platform ?? '')
+        if (!slug || !platform) {
+          sendJson(res, 400, { ok: false, error: '缺少 slug 或 platform' })
+          return
+        }
+        const result = await publish.draftEpisode(
+          root,
+          slug,
+          platform,
+          typeof body?.mode === 'string' ? body.mode : 'auto',
+          { publishRpa: config.publishRpa, publishUrls: config.publishUrls },
+        )
+        sendJson(res, result.result.ok ? 200 : 400, result)
         return
       }
 

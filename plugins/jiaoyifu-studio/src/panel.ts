@@ -107,6 +107,16 @@ select.status-select{background:var(--panel2);border:1px solid var(--border);col
 .pcard .pu-note{font-size:11px;color:var(--muted)}
 
 video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px solid var(--border);outline:none}
+.vstages{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.vstage{display:flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--border);border-radius:999px;padding:4px 12px;font-size:12.5px;color:var(--muted)}
+.vstage.done{color:var(--text);border-color:rgba(63,185,80,.5)}
+.vstage .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0}
+.vstage.done .dot{background:var(--green)}
+.vstage .vnote{font-size:11px;color:var(--muted)}
+.varrow{color:var(--muted);font-size:12px}
+.vcontrols{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.vchk{display:flex;align-items:center;gap:4px;font-size:12.5px;color:var(--text)}
+.vfoot{margin-top:12px;font-size:12px;color:var(--muted)}
 .subline{display:flex;gap:12px;padding:8px 10px;border-radius:8px;cursor:pointer;align-items:baseline}
 .subline:hover{background:var(--panel2)}
 .subline .t{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--blue);flex-shrink:0;width:74px}
@@ -155,8 +165,7 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     <div class="empty">
       <div class="big">🎬</div>
       <h2>脚姨夫内容工作台</h2>
-      <p>左侧是内容库（本地目录映射），点一期进入五 Tab 详情：</p>
-      <p>概览（选题 + 五平台状态） · 视频 · 脚本 · 字幕 · 文章</p>
+      <p>👈 点击左侧一期内容，进入 概览 / 视频 / 脚本 / 字幕 / 文章</p>
       <p>在 DSH 会话里说「帮我新建一期《标题》」即可开始创作，</p>
       <p>或用 <code>/content &lt;slug&gt;</code> 把某一期绑进对话上下文。</p>
     </div>
@@ -173,6 +182,7 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
   var PANEL_BASE = location.pathname.replace(/\\/$/, '');
   var list = [];
   var current = null;
+  var autoOpened = false;
   var searchText = '';
   var listTimer = null;
   var detailTimer = null;
@@ -371,6 +381,10 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     box.innerHTML = html;
     qs('#side-foot').textContent = '共 ' + list.length + ' 期 · 点击查看详情';
     if (openSlug) openItem(openSlug, true);
+    else if (!autoOpened && !current && list.length) {
+      autoOpened = true;
+      openItem(list[0].slug, true);
+    }
   }
 
   // ---------- 详情 ----------
@@ -384,6 +398,8 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     }).catch(function () { toast('加载详情失败') });
   }
   var currentTab = 'overview';
+  var busy = null;
+  var videoProbe = null;
   function switchTab(name) {
     currentTab = name;
     var tabs = document.querySelectorAll('.tab');
@@ -394,8 +410,8 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     if (!current) return;
     if (name === 'overview') body.innerHTML = overviewHtml(current);
     else if (name === 'video') body.innerHTML = videoHtml(current);
-    else if (name === 'script') body.innerHTML = docHtml('script.md', current.files.script, '脚本');
-    else if (name === 'subs') body.innerHTML = subsHtml(current);
+    else if (name === 'script') body.innerHTML = docHtml('script.md', current.files.script, '脚本') + docHtml('storyboard.md', current.files.storyboard, '分镜表');
+    else if (name === 'subs') body.innerHTML = subsHtml(current) + docHtml('storyboard.md', current.files.storyboard, '分镜表');
     else if (name === 'article') body.innerHTML = docHtml('article.md', current.files.article, '文章');
   }
   function renderDetail(tab) {
@@ -451,7 +467,17 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     else html += '<div class="topic-text" style="color:var(--muted)">（还没有选题：在 DSH 对话里说「帮我定这一期的选题，写进 topic.md」）</div>';
     html += '</div>';
 
-    html += '<div class="card"><h3>📺 多平台发布状态 <span class="file">meta.json</span></h3>';
+    html += '<div class="card"><h3>📺 多平台发布状态 <span class="file">meta.json · publish/</span></h3>';
+    html += '<div class="vcontrols" style="margin-bottom:12px">';
+    html += '<button class="btn primary" data-act="publish-pack"' + (busy ? ' disabled' : '') + '>' + (busy === 'pack' ? '生成中…' : '生成发布包') + '</button>';
+    html += '<select class="status-select" id="pub-platform">';
+    for (var pi = 0; pi < PLATFORMS.length; pi++) {
+      html += '<option value="' + PLATFORMS[pi].key + '">' + PLATFORMS[pi].label + '</option>';
+    }
+    html += '</select>';
+    html += '<button class="btn" data-act="publish-draft"' + (busy ? ' disabled' : '') + '>' + (busy === 'draft' ? '填入中…' : '填草稿') + '</button>';
+    html += '<span class="pu-note">只填草稿，不点发布</span>';
+    html += '</div>';
     html += '<div class="pgrid">';
     for (var i = 0; i < PLATFORMS.length; i++) {
       html += platformCardHtml(item, PLATFORMS[i]);
@@ -481,19 +507,114 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     html += '</select>';
     html += '<button class="btn small primary" data-act="save-platform" data-key="' + pf.key + '">保存</button>';
     html += '</div>';
-    html += '<div class="pu-note" style="margin-top:8px">' + (p.publishStatus === 'published' ? '已公开' : p.publishStatus === 'draft' ? '草稿已备，公开前人工确认' : '') + '</div>';
+    var facts = (item.publishFacts && item.publishFacts[pf.key]) || {};
+    var packNote = facts.exists ? ('已生成 ' + (facts.pack || ('publish/' + pf.key + '.md'))) : '发布包未生成';
+    var statusNote = p.publishStatus === 'published' ? '已公开' : p.publishStatus === 'draft' ? '草稿已备，公开前人工确认' : '';
+    html += '<div class="pu-note" style="margin-top:8px">' + packNote + (statusNote ? ' · ' + statusNote : '') + '</div>';
     html += '</div>';
     return html;
   }
 
   function videoHtml(item) {
-    if (!item.hasVideo) {
-      return '<div class="card"><h3>🎞️ 成片 <span class="file">video.mp4</span></h3>' +
-        '<p style="color:var(--muted)">还没有成片。把 video.mp4 放进目录后刷新：</p>' +
-        '<p style="margin-top:6px"><code style="background:var(--panel2);padding:2px 8px;border-radius:6px;font-size:12px">' + esc(item.dir) + '/video.mp4</code></p></div>';
+    var html = '';
+    if (item.hasVideo) {
+      html += '<div class="card"><h3>🎞️ 成片预览 <span class="file">video.mp4</span></h3>' +
+        '<video id="studio-video" controls preload="metadata" src="' + esc(item.videoUrl) + '"></video></div>';
     }
-    return '<div class="card"><h3>🎞️ 成片预览 <span class="file">video.mp4</span></h3>' +
-      '<video id="studio-video" controls preload="metadata" src="' + esc(item.videoUrl) + '"></video></div>';
+    var v = item.video || {};
+    var facts = item.videoFacts || {};
+    var scriptChars = String(item.files.script || '').trim().length;
+    var voiceCount = facts.voiceCount || 0;
+    var hasSrt = !!String(item.files.subs || '').trim();
+    var hasBoard = !!(facts.storyboard || (item.files && String(item.files.storyboard || '').trim()));
+    var boardNote = '待生成';
+    if (hasBoard) {
+      boardNote = (v.storyboard && v.storyboard.shots) ? (v.storyboard.shots + ' 镜') : '已生成';
+    }
+    var stages = [
+      { name: '文案', done: scriptChars > 0, note: scriptChars > 0 ? scriptChars + ' 字' : '待写' },
+      { name: '配音', done: voiceCount > 0, note: voiceCount > 0 ? voiceCount + ' 段' + (v.durationSec ? ' / ' + v.durationSec + 's' : '') : '待生成' },
+      { name: '字幕', done: hasSrt, note: hasSrt ? 'SRT 就绪' : '待生成' },
+      { name: '分镜', done: hasBoard, note: boardNote },
+      { name: '合成', done: item.hasVideo, note: item.hasVideo ? (v.durationSec ? v.durationSec + 's' : '已合成') : '待合成' }
+    ];
+    html += '<div class="card"><h3>🎬 视频生产流水线 <span class="file">升级自 MoneyPrinterTurbo · 本机 say + ffmpeg，零 API</span></h3>';
+    html += '<div class="vstages">';
+    for (var i = 0; i < stages.length; i++) {
+      var s = stages[i];
+      html += '<div class="vstage' + (s.done ? ' done' : '') + '"><span class="dot"></span>' + s.name + '<span class="vnote">' + esc(s.note) + '</span></div>';
+      if (i < stages.length - 1) html += '<div class="varrow">→</div>';
+    }
+    html += '</div>';
+    var p = videoProbe;
+    var sayOk = p ? p.probe.say : true;
+    var ffmpegOk = p ? p.probe.ffmpeg : true;
+    html += '<div class="vcontrols">';
+    html += '<select class="status-select" id="vd-voice">';
+    if (p && p.zhVoices && p.zhVoices.length) {
+      for (var j = 0; j < p.zhVoices.length; j++) {
+        var vn = p.zhVoices[j];
+        var sel = (v.voice && vn === v.voice) || (!v.voice && p.defaultVoice && vn === p.defaultVoice);
+        html += '<option value="' + esc(vn) + '"' + (sel ? ' selected' : '') + '>' + esc(vn) + '</option>';
+      }
+    } else {
+      html += '<option value="">默认音色</option>';
+    }
+    html += '</select>';
+    html += '<button class="btn" data-act="video-voice"' + (busy || !sayOk ? ' disabled' : '') + '>' + (busy === 'voice' ? '配音生成中…' : '① 生成配音') + '</button>';
+    html += '<button class="btn" data-act="video-subs"' + (busy ? ' disabled' : '') + '>' + (busy === 'subs' ? '字幕生成中…' : '② 生成字幕') + '</button>';
+    html += '<button class="btn" data-act="video-storyboard"' + (busy ? ' disabled' : '') + '>' + (busy === 'storyboard' ? '分镜生成中…' : '生成分镜表') + '</button>';
+    var ress = [['1080x1920', '竖屏 1080x1920'], ['1920x1080', '横屏 1920x1080'], ['720x1280', '竖屏 720x1280']];
+    html += '<select class="status-select" id="vd-res">';
+    for (var k = 0; k < ress.length; k++) html += '<option value="' + ress[k][0] + '">' + ress[k][1] + '</option>';
+    html += '</select>';
+    html += '<label class="vchk"><input type="checkbox" id="vd-subs" checked> 烧字幕</label>';
+    html += '<label class="vchk"><input type="checkbox" id="vd-bgm"' + (facts.hasBgm ? ' checked' : ' disabled') + '> BGM</label>';
+    html += '<button class="btn primary" data-act="video-compose"' + (busy || !ffmpegOk ? ' disabled' : '') + '>' + (busy === 'compose' ? '合成中（ffmpeg）…' : '④ 合成成片') + '</button>';
+    html += '</div>';
+    if (p && !sayOk) html += '<div class="hint">本机没有 say 命令（需要 macOS TTS），配音不可用。</div>';
+    if (p && !ffmpegOk) html += '<div class="hint">本机没有 ffmpeg：brew install ffmpeg 后可合成（配音/字幕不受影响）。</div>';
+    html += '<div class="vfoot">对话同样可触发：绑定本期后说「给这期配音、出字幕、合成成片」。素材图片放 materials/（按文件名序轮播），BGM 放 bgm/，没有素材则纯色底。</div>';
+    html += '</div>';
+    if (!videoProbe) loadVideoProbe();
+    return html;
+  }
+
+  function loadVideoProbe() {
+    if (!current) return;
+    fetchJson(PANEL_BASE + '/api/video/status?slug=' + encodeURIComponent(current.slug)).then(function (d) {
+      if (d && d.ok) {
+        videoProbe = d;
+        if (currentTab === 'video') renderDetail(currentTab);
+      }
+    }).catch(function () { /* 探测失败下次再试 */ });
+  }
+
+  function runVideoStage(kind) {
+    if (!current || busy) return;
+    busy = kind;
+    renderDetail(currentTab);
+    var body = { slug: current.slug };
+    if (kind === 'voice') {
+      var vs = qs('#vd-voice');
+      if (vs && vs.value) body.voice = vs.value;
+    } else if (kind === 'compose') {
+      var rs = qs('#vd-res');
+      body.resolution = rs ? rs.value : '1080x1920';
+      var cs = qs('#vd-subs');
+      body.burnSubs = cs ? cs.checked : true;
+      var cb = qs('#vd-bgm');
+      body.withBgm = cb ? cb.checked : false;
+    }
+    postJson(PANEL_BASE + '/api/video/' + kind, body).then(function (d) {
+      busy = null;
+      if (d && d.ok) { toast(d.message || '完成'); refreshAll() }
+      else { toast((d && d.error) || '操作失败'); refreshAll() }
+    }).catch(function () {
+      busy = null;
+      toast('请求失败（长任务可能仍在后台执行）');
+      renderDetail(currentTab);
+    });
   }
 
   function docHtml(fileName, content, label) {
@@ -537,6 +658,12 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
       }).catch(function () { toast('操作失败') });
     }
     else if (act === 'save-platform') savePlatform(elNode.getAttribute('data-key'));
+    else if (act === 'video-voice') runVideoStage('voice');
+    else if (act === 'video-subs') runVideoStage('subs');
+    else if (act === 'video-storyboard') runVideoStage('storyboard');
+    else if (act === 'video-compose') runVideoStage('compose');
+    else if (act === 'publish-pack') runPublishPack();
+    else if (act === 'publish-draft') runPublishDraft();
     else if (act === 'subs-seek') {
       var t = parseFloat(elNode.getAttribute('data-t') || '0');
       switchTab('video');
@@ -546,6 +673,37 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
         else toast('还没有成片视频');
       }, 30);
     }
+  }
+  function runPublishPack() {
+    if (!current || busy) return;
+    busy = 'pack';
+    renderDetail(currentTab);
+    postJson(PANEL_BASE + '/api/publish/pack', { slug: current.slug }).then(function (d) {
+      busy = null;
+      if (d && d.ok) { toast('发布包已生成'); refreshAll(); }
+      else { toast((d && d.error) || '生成失败'); refreshAll(); }
+    }).catch(function () {
+      busy = null;
+      toast('请求失败');
+      renderDetail(currentTab);
+    });
+  }
+  function runPublishDraft() {
+    if (!current || busy) return;
+    var sel = qs('#pub-platform');
+    var platform = sel && sel.value ? sel.value : 'xhs';
+    busy = 'draft';
+    renderDetail(currentTab);
+    postJson(PANEL_BASE + '/api/publish/draft', { slug: current.slug, platform: platform, mode: 'open' }).then(function (d) {
+      busy = null;
+      var r = d && d.result ? d.result : d;
+      if (r && r.ok) { toast(r.message || '草稿已处理'); refreshAll(); }
+      else { toast((r && r.error) || (d && d.error) || '填草稿失败'); refreshAll(); }
+    }).catch(function () {
+      busy = null;
+      toast('请求失败');
+      renderDetail(currentTab);
+    });
   }
   function savePlatform(key) {
     if (!current) return;
@@ -613,7 +771,7 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     detailTimer = setInterval(function () {
       var ae = document.activeElement;
       var editing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT' || ae.tagName === 'TEXTAREA');
-      if (!document.hidden && current && !editing) openItem(current.slug, true);
+      if (!document.hidden && current && !editing && !busy) openItem(current.slug, true);
     }, 8000);
   }
   window.addEventListener('beforeunload', function () {

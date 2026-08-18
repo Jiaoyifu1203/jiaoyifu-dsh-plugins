@@ -19,7 +19,7 @@ import Schema from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { classify } from './taxonomy.ts'
-import { isAutonomyTask, routeSkills, topicFingerprint, type RankedSkill, type SkillEntry, type SkillUsage } from './router.ts'
+import { isAutonomyTask, routeSkills, topicFingerprint, withLlmFallback, type RankedSkill, type SkillEntry, type SkillUsage } from './router.ts'
 import { catalogPaths, loadCatalog, saveCatalogDebounced, type Catalog } from './persist.ts'
 
 export const name = 'jiaoyifu-skill-router'
@@ -48,6 +48,8 @@ export interface Config {
   llmProvider?: string
   /** 兜底模型名，用便宜档（默认 deepseek-v4-flash） */
   llmModel?: string
+  /** 主模型失败时的 fallback（默认 deepseek-v4-pro） */
+  llmFallbackModel?: string
   /** 兜底调用超时（毫秒，默认 20s） */
   llmTimeoutMs?: number
 }
@@ -64,6 +66,7 @@ export const Config: Schema<Config> = Schema.object({
   llmFallbackThreshold: Schema.number().default(30),
   llmProvider: Schema.string().default('deepseek-official'),
   llmModel: Schema.string().default('deepseek-v4-flash'),
+  llmFallbackModel: Schema.string().default('deepseek-v4-pro'),
   llmTimeoutMs: Schema.number().default(20000),
 })
 
@@ -109,6 +112,7 @@ export function apply(ctx: Context, config: Config): void {
   const llmFallbackThreshold = config.llmFallbackThreshold ?? 30
   const llmProvider = config.llmProvider ?? 'deepseek-official'
   const llmModel = config.llmModel ?? 'deepseek-v4-flash'
+  const llmFallbackModel = config.llmFallbackModel ?? 'deepseek-v4-pro'
   const llmTimeoutMs = config.llmTimeoutMs ?? 20000
 
   /** 会话级注入状态 */
@@ -227,42 +231,40 @@ export function apply(ctx: Context, config: Config): void {
     const cacheKey = query.slice(0, 120)
     let order = rerankCache.get(cacheKey)
     if (order === undefined) {
-      try {
-        const prompt = [
-          '你是技能路由排序器。给定任务需求与候选技能，只输出你认为最相关的技能名（kebab-case），',
-          '按相关性从高到低，每行一个，最多 5 个；不要输出任何解释。',
-          '',
-          `任务需求：${query.slice(0, 300)}`,
-          '',
-          '候选技能：',
-          ...candidates.map((c, i) => `${i + 1}. ${c.name} — ${(c.description ?? '').replace(/\s+/g, ' ').slice(0, 80)}`),
-        ].join('\n')
-        const assembler = new BlockAssembler()
-        const deadline = AbortSignal.timeout(llmTimeoutMs)
-        const stream = ctx.llm.stream({
-          provider: llmProvider,
-          model: llmModel,
-          messages: [createUserMessage({
-            content: [{ type: 'text', text: prompt }],
-            source: { kind: 'plugin', plugin: 'jiaoyifu-skill-router' },
-          })],
-          maxTokens: 80,
-          temperature: 0,
-        })
-        for await (const chunk of stream) {
-          if (deadline.aborted) break
-          assembler.push(chunk)
-        }
-        const text = assembler.blocks()
-          .filter((b: any) => b.type === 'text')
-          .map((b: any) => b.text)
-          .join('\n')
-        order = parseOrder(text, candidates) ?? undefined
-      } catch (err) {
-        console.warn('[jiaoyifu-skill-router] LLM 兜底重排失败，退回词面结果:', err)
-        return null
-      }
-      if (order === undefined) return null
+      const prompt = [
+        '你是技能路由排序器。给定任务需求与候选技能，只输出你认为最相关的技能名（kebab-case），',
+        '按相关性从高到低，每行一个，最多 5 个；不要输出任何解释。',
+        '',
+        `任务需求：${query.slice(0, 300)}`,
+        '',
+        '候选技能：',
+        ...candidates.map((c, i) => `${i + 1}. ${c.name} — ${(c.description ?? '').replace(/\s+/g, ' ').slice(0, 80)}`),
+      ].join('\n')
+      const parsed = await withLlmFallback(
+        [llmModel, llmFallbackModel],
+        async (model) => {
+          const assembler = new BlockAssembler()
+          const stream = ctx.llm.stream({
+            provider: llmProvider,
+            model,
+            messages: [createUserMessage({
+              content: [{ type: 'text', text: prompt }],
+              source: { kind: 'plugin', plugin: 'jiaoyifu-skill-router' },
+            })],
+            maxTokens: 80,
+            temperature: 0,
+          })
+          for await (const chunk of stream) assembler.push(chunk)
+          const text = assembler.blocks()
+            .filter((b: any) => b.type === 'text')
+            .map((b: any) => b.text)
+            .join('\n')
+          return parseOrder(text, candidates)
+        },
+        llmTimeoutMs,
+      )
+      if (!parsed) return null
+      order = parsed
       if (rerankCache.size >= RERANK_CACHE_MAX) {
         const oldest = rerankCache.keys().next().value
         if (oldest !== undefined) rerankCache.delete(oldest)

@@ -1,6 +1,76 @@
 # CONTEXT · DeepSeek Harness + Pi
 
+## 全局约束（最高优先级 · 2026-08-18 生效）
+
+- **所有执行类型的工作交付子代理操作**：父代理不亲自写文件、跑命令、改代码、调研、实现、验证、交付；
+  整包委派走 `model_agent`，扫描/检索/核对走 `scout`，带上下文子任务走 `subagent`/`subagent_fork`。
+- 父代理职责：理解需求、规划拆分、写自包含交接包、委派、核对验收、合并交付；DSH 插件工具环节
+  （content_*/track_*/vision_*/skill_*/scout 等）由父代理代办。
+- 委派前一句话报执行模型（默认落盘 `~/.dsh/model-agent.json`）；未配置默认模型先 ask_user_question 让用户选。
+- 豁免：读约束/上下文文件、核对交付、写交接包、插件代办、汇报——非执行类，父代理可直接做。
+- 权威载体：环境级 `~/.dsh/AGENTS.md`（DSH 全部会话自动加载）；本工作区 `AGENTS.md` 为其投影；冲突时以环境级为准。
+- 2026-08-18 增补（与知识库协议同步）：开场任务识别门禁（识别卡格式对齐 claude桌面版/AGENTS.md §3，任务ID 走 track 账本 ISS-xxx，用户确认后执行）+ 收尾门（标准句「是否进入收尾流程？」，三档 Micro/Light/Full 对齐 gate-close v2.9）；DSH 不进 Codex 任务总线（不跑 launcher、不写 route_events.jsonl、不造 TASK-xxx）。
+
 状态：Pi 已通（/login DeepSeek 后 V4 可选）。dsh 走官方 `npx @deepseek-ai/dsh web`，启动脚本是 `scripts/start-web.sh`。不克隆源码仓。
+
+## 2026-08-18 DSH 环境治理三件套：启动器 + 环境级委派约束 + 识别/收尾门同步
+
+- 启动器：根目录 `启动DeepSeekHarness.command`（Finder 双击 -> 自动开终端起服务 -> 轮询 3080 就绪后开浏览器；关窗即停服务）。
+- 环境级全局约束（权威迁移）：`~/.dsh/AGENTS.md`（dsh rc.7 内置 agent-instructions 的 user-global 文件，文件名硬编码 AGENTS.md，
+  全部 profile/工作区自动加载、改动即时生效）承载「执行类工作一律交付子代理」硬约束（model_agent 整包 / scout 扫描 / subagent_fork 带上下文）；
+  本工作区 `AGENTS.md` 降为其投影。曾误把权威落在项目文件夹，用户纠正后迁移到环境级。
+- 协议同步：~/.dsh/AGENTS.md §2 开场任务识别门禁（识别卡格式对齐 claude桌面版/AGENTS.md §3，任务ID 走 track 账本 ISS-xxx，
+  用户确认后执行）+ §3 收尾门（标准句「是否进入收尾流程？」，Micro/Light/Full 三档对齐 gate-close v2.9）。
+  边界：DSH 不进 Codex 任务总线（不跑 port_runtime_guard_launcher、不写 route_events.jsonl、不造 TASK-xxx）。
+- 插件侧同步（需重启 `./scripts/start-web.sh` 生效）：dsh-model-agent systemPrompt 注入段补环境级约束 + 识别/收尾指引；
+  cordis.yml grok `--rules` 强化（交付报告末尾禁止任何收尾/确认问句）。
+- 踩坑：① grok 子代理会向上读到父级 claude桌面版/AGENTS.md（Codex 协议），交付末尾冒「是否进入收尾门」旧句；
+  ACP 执行合同 + --rules 双重覆盖，强化版待重启验证。② user-global 规则文件名不可配置，改内容不改名。
+- 知识库侧回写建议（超出本会话沙箱，留给用户/Codex 端）：L1 卡片《DeepSeek Harness与Pi速查》补「环境级规则文件 + 委派/识别/收尾三协议」条目；
+  权威 daily 补 1-3 行；跨端复盘卡记 DSH 端协议已对齐知识库口径。
+
+## 2026-08-18 P0/P1/P2 全量落地（委派 grok 四棒）
+
+- 四棒委派落地：A=better-sidebar 焊接 + 3 社区插件；B=发布适配器 + 分镜；C=三层记忆 + 被动质检 + fallback + plugin-check；D=分镜关键词去重 + 全量终验 + 文档 + 提交。
+- better-sidebar 裸包名接入：`package.json` 写 `file:` 链，cordis `name` 用裸包名（bundle id = entry name，社区 client.js 把 id 写死成包名）；`$DSH_HOME/profiles/node_modules` symlink 到本仓 `node_modules`（profile `createRequire` 才能 resolve）；启动参数 **`--patch` 必须在 `--port` 前**，否则 launcher 把 `--port` 当应用参数。禁止 `dsh plugin add`（社区包自带 `dsh.bundle.patch`，会双挂载）。
+- 发布适配器铁律：`publish_pack` / `publish_draft` 只生成发布包、只填草稿，任何路径不点发布/提交/上传；`publishRpa` 默认 false。
+- 分镜：`video_storyboard` 出 `storyboard.md`，合成能解析分镜表则 `composeMode=storyboard`（分段 mp4 + concat），否则 `legacy`；关键词零 API：长词（3 字+）优先、跨 n-gram 子串去重、区间重叠丢掉碎词、每镜 1–3 个。
+- 三层记忆注入 45/35/20（L1 标题不截、FIFO 8、注入最近 3）；qc 异步 `setTimeout(0)` + 静默降级；llm-fallback 两处接入（studio qc 与 skill-router 词面低置信重排）；`npm run check:plugins`（`scripts/plugin-check.mjs`）。
+- 生效：本机重启 `./scripts/start-web.sh`（插件无热加载；会话沙箱不能重启 3080）。
+- 遗留：RPA 未实测（`publishRpa` 默认 false）、侧边栏 UI 点击验收待重启后人工、社区插件与 3080 实例共存待真实重启确认。
+
+## 2026-08-18 插件生态扫描（X + GitHub）：结合效率方案
+
+- 调研报告：`plugins/ECOSYSTEM-SCAN-20260818.md`（X API 四轮检索 + GitHub API 实测星数）。
+- 核心发现：DSH 已长出生态——omdsh-dev 组织 30 仓 + dshfind.com 目录站，安装标准化
+  `dsh plugin --profile web add <npm包>`；CC 生态高星模式多数已有对应物。
+- 与工作台结合最直接的三个：DSH-better-sidebar（2038⭐，`ctx.betterSidebar.registerTab/registerFileViewer`
+  服务化侧边栏，studio 面板可注册进去与文件/终端/Git 同屏；其生态还有 dsh-video-preview 内联视频预览）、
+  widget-dock（27 张常显卡片：token/成本/上下文压力/待办/目标，让 token-doctor/track 数据全程可见）、
+  MatrixMedia-cli + social-auto-upload（五平台发布适配器，RPA 只填草稿、人点发布，正好接 studio 二期）。
+- 方案分三档落报告 P0/P1/P2：P0=装 better-sidebar（先内嵌浏览器零开发、再 registerTab 深整合）
+  + widget-dock；P1=发布适配器 + 视频产线加分镜阶段；P2=mnemon 三层记忆升级 /content 注入、
+  advisor 被动质检、llm-fallbacks 容错、plugin-check 自有插件体检。
+- 待办：--patch 自装插件与社区 npm 插件的共存性需本机实测（better-sidebar 与 aionui-panel 有互斥逻辑，
+  与本仓 cordis.yml patch 的关系未见文档）；装完需本机重启 start-web.sh（会话沙箱内不能重启 3080）。
+
+## 2026-08-17 jiaoyifu-studio v1.1：视频生产流水线（升级自 MoneyPrinterTurbo）
+
+- 需求：参考 https://github.com/harry0703/MoneyPrinterTurbo，在内容工作台内增加视频生产工作台（不是独立插件，长在 studio 里）。
+- 流水线与本地化映射（零 API 铁律）：文案=script.md（对话写）-> 配音=macOS `say`（逐句 voice/NN.aiff，
+  `afinfo` 实测时长，中文音色自动探测优先 Tingting/Meijia，新版 macOS 为 Eddy/Flo 等多语言音色，
+  音色名带中文括号后缀、按 `zh_CN` locale 列解析）-> 字幕=按句时长累加 SRT（写 subs.srt，字幕 Tab 联动）
+  -> 合成=ffmpeg（materials/ 图片按文件名序轮播或纯色底 + aac 配音 + amix BGM(0.25) + 烧字幕 PingFang SC，
+  输出 video.mp4 即本期成片，+faststart 利于浏览器拖动）。
+- 新文件：`plugins/jiaoyifu-studio/src/video.ts`（探测/切句/TTS/SRT/合成引擎，execFile 无 shell 注入面，
+  合成失败自动降级重试：去字幕 -> 去 BGM）；store.ts 的 meta.json 增加 `video` 字段（stage/voice/sentences/durationSec）。
+- 新工具 4 个：video_probe / video_voice / video_subs / video_compose；新路由 4 条：
+  GET /api/video/status + POST /api/video/{voice,subs,compose}；/api/item 附 videoFacts。
+- 面板视频 Tab 升级：成片播放器 + 流水线卡片（四阶段进度点 + 音色下拉 + ①②③ 按钮 + 分辨率/烧字幕/BGM 选项；
+  busy 态防 8s 自动刷新打断；probe 缺 say/ffmpeg 时禁用按钮并给安装指引）。
+- cordis.yml 新增 videoVoice/videoRate/videoResolution 配置；发布铁律不变（只写草稿）。
+- 遗留：素材下载 API（Pexels/Pixabay key）、BGM 音乐库、whisper 转写已有成片字幕（可接 jiaoyifu-zhuzigao 技能）。
+- 生效：本机终端重启 `./scripts/start-web.sh`（插件无热加载）。
 
 ## 2026-08-17 交互约定：全权委派 = model_agent（模型可切换，组合分工操作路径）
 
@@ -23,7 +93,7 @@
   → 4. 父代理核对（未达标可二次委派）→ 5. 插件环节父代理补做 → 6. 合并交付用户。
 - 完整协议已落技能 `skills/dsh-model-agent-delegation/SKILL.md`
   （link-skills.sh 链接后，skill-router 遇「用 grok agent / 全权委托 / 换模型」自动路由）。
-- 单步小活（读个文件/改一行代码）不触发委派，直接做。
+- 2026-08-18 起升级为全局硬约束：执行类工作（含改一行代码）一律交付子代理，父代理不再直接做；权威载体是环境级 `~/.dsh/AGENTS.md`（本工作区 `AGENTS.md` 为其投影），见文件顶部「全局约束」。
 
 ## 2026-08-17 grok 接入演进：临时补丁 → cordis.yml 合并 → dsh-model-agent 插件
 

@@ -1,6 +1,7 @@
 # jiaoyifu 插件集 · 加载补丁
 # 由 scripts/start-web.sh 通过 `--patch` 自动加载，不要手动编辑绝对路径以外的内容。
-# 插件源码在 plugins/jiaoyifu-*/src/index.ts（TS 源文件直接注册，DSH loader 自动打包）。
+# jiaoyifu-* 多数仍以 TS 绝对路径注册（DSH loader 直接打包）；jiaoyifu-studio 与 3 个社区插件
+# 用裸包名（需 scripts/install-community-plugins.sh 把包链进 ~/.dsh/profiles/node_modules）。
 - insert:
     - id: jiaoyifu-skill-router
       name: "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness/plugins/jiaoyifu-skill-router/src/index.ts"
@@ -16,6 +17,7 @@
         llmFallbackThreshold: 30
         llmProvider: "deepseek-official"
         llmModel: "deepseek-v4-flash"
+        llmFallbackModel: "deepseek-v4-pro"
         llmTimeoutMs: 20000
     - id: jiaoyifu-token-doctor
       name: "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness/plugins/jiaoyifu-token-doctor/src/index.ts"
@@ -43,7 +45,7 @@
     - id: jiaoyifu-feishu
       name: "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness/plugins/jiaoyifu-feishu/src/index.ts"
       config:
-        # 飞书总控台：全任务监管（/tasks + 完成推送）+ 随时介入（/steer）+ 审批接管
+        # 飞书总控台：全任务监管（/tasks + 完成推送）+ 随时介入（/steer）+ 审批双端同步
         # App Secret 只走环境变量 FEISHU_APP_SECRET（scripts/start-web.sh 自动加载 plugins/feishu.env）
         appId: "cli_a9337098af78dbcd"
         appSecretEnv: "FEISHU_APP_SECRET"
@@ -56,26 +58,68 @@
         # 任务结束/出错自动推送飞书；任务开始推送默认关（易刷屏）
         notifyTurnEnd: true
         notifyTurnStart: false
-        # 进度推送：运行超过 60s 开始报，之后每 3 分钟一条（含最近工具名）
-        progressFirstAfterMs: 60000
-        progressIntervalMs: 180000
-        # 审批最长等待 30 分钟，超时 fail-closed
+        # 进度推送：满 30s 开始报，之后每 30s 一条（父工具名；不打断委派）
+        progressFirstAfterMs: 30000
+        progressIntervalMs: 30000
+        # 审批最长等待 30 分钟；超时只取消飞书等待，不自动拒绝（Web 端可能还在等点击）
         approvalTimeoutMs: 1800000
+        # Web 控制台基址（仅 127.0.0.1）。优先用 ctx.webServer.port（OS 实分配端口）；拿不到才用这项
+        webBaseUrl: "http://127.0.0.1:3080"
+    # 社区：VSCode 式侧边栏工作台。client 半提供 ctx.betterSidebar 服务。
+    # 装法见 scripts/install-community-plugins.sh（勿用 dsh plugin add，以免 bundle 层再 insert 一次双挂载）。
+    - id: dsh-better-sidebar
+      name: dsh-better-sidebar
+    # 社区：对话两侧常显卡片（token/成本/待办/目标）。需要调参时再解开 config。
+    - id: widget-dock
+      name: widget-dock
+      # config:
+      #   # 见 widget-dock 包内 Config；缺省即可
+    # 社区：侧边栏视频内联预览（.mp4 等 + HTTP Range 206）。依赖 better-sidebar。
+    - id: dsh-video-preview
+      name: dsh-video-preview
+      # config:
+      #   # 见 dsh-video-preview 包内 Config；缺省即可
     - id: jiaoyifu-studio
-      name: "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness/plugins/jiaoyifu-studio/src/index.ts"
+      name: jiaoyifu-studio
       config:
-        # 内容工作台（复刻 Oil Creator）：内容库目录 + /content 绑定 + /jiaoyifu/studio 面板
+        # 内容工作台（复刻 Oil Creator）+ 视频生产流水线（升级自 MoneyPrinterTurbo）：
+        # 内容库目录 + /content 绑定 + /jiaoyifu/studio 面板 + video_* 工具（say/ffmpeg 本机零 API）
         # contentRoot 留空 = ~/.dsh/content；也可指向已有内容目录（目录即数据库）
+        # client 半（src/client.js）向 better-sidebar 注册 Tab；服务缺失时静默不激活，host 半不受影响。
         contentRoot: ""
         panelPath: "/jiaoyifu/studio"
         maxInjectChars: 600
+        # 视频产线默认参数：音色留空自动探测本机中文音色（say -v '?'）；分辨率默认竖屏
+        videoVoice: ""
+        videoRate: 190
+        videoResolution: "1080x1920"
+        # 发布适配器：RPA 默认关（只填草稿、绝不点发布）。可选 npm i --cache .tmp-tooling/npm-cache playwright
+        publishRpa: false
+        # 覆盖创作后台 URL，键为 xhs / bilibili / douyin / shipinhao / gzh
+        publishUrls: {}
+        # 被动质检：写 script/article 后异步跑 flash，失败回退 pro
+        qcEnabled: true
+        qcProvider: "deepseek-official"
+        qcModel: "deepseek-v4-flash"
+        qcFallbackModel: "deepseek-v4-pro"
+        qcTimeoutMs: 15000
     # grok 子代理提供方：grok CLI（登录账户 OAuth），model_agent 的 grok 档后端
     - id: grok-acp-provider
       name: '@deepseek-ai/dsh-subagent-acp'
       config:
         providerName: grok
         command: '/Users/gerryyin/.grok/bin/grok'
-        args: ['--no-auto-update', '--always-approve', 'agent', 'stdio']
+        # 官方推荐：flags 在 `agent` 与 `stdio` 之间。--no-leader 避免挂到已有 TUI。
+        # --rules 盖过工作区 AGENTS.md 的识别卡/收尾门（否则子代理会停住不干活）。
+        args:
+          - '--no-auto-update'
+          - '--no-memory'
+          - '--rules'
+          - 'DSH-SUBAGENT: 用户与父代理已确认。禁止任务识别卡/收尾门/启动报告，包括交付报告末尾的任何收尾/确认问句（如「是否进入收尾流程？」）。立刻执行 prompt 任务，交付结果即止。'
+          - 'agent'
+          - '--always-approve'
+          - '--no-leader'
+          - 'stdio'
         # ACP 子进程的权限请求一律自动批准（harness 侧兜底，CLI 侧另有 --always-approve）
         permission: allow
         env:
@@ -91,3 +135,5 @@
         configPath: ""
         # 首次默认模型；留空 = 首次调用时由父代理向用户确认后选定
         defaultModel: ""
+        # 委派中每 30s 更新 Web 待办条，不进对话、不会打断
+        heartbeatMs: 30000

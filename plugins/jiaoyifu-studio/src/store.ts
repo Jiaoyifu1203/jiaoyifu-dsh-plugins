@@ -10,13 +10,27 @@
  *     article.md  文章
  *     cover.{png,jpg,jpeg,webp}  封面
  *     video.mp4   成片
+ *     voice/      视频产线：逐句 TTS 音频 NN.aiff + voice.json（句子/时长）
+ *     materials/  视频产线：本地素材（图片，按文件名序轮播）
+ *     bgm/        视频产线：可选背景音乐（取第一个音频文件，循环混音）
+ *     storyboard.md  视频产线：分镜表（镜号/台词/时长/关键词/素材槽）
+ *     publish/    发布包：<platform>.md（只填草稿，不点发布）
  *
  * 期状态机：not_started(未开始) → preparing(准备中) → ready(待发布) → published(已发布)
  * 平台状态：unpublished(未发布) / draft(草稿已备) / published(已发布)
+ * 视频产线：script -> voice -> subs -> storyboard -> done，见 video.ts
  */
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import {
+  appendMemory,
+  makeMemoryEntry,
+  type MemoryEntry,
+  type QcInfo,
+} from './memory.ts'
+
+export type { MemoryEntry, QcInfo }
 
 export type EpisodeStatus = 'not_started' | 'preparing' | 'ready' | 'published'
 export type PublishStatus = 'unpublished' | 'draft' | 'published'
@@ -54,6 +68,34 @@ export interface PlatformInfo {
   url?: string
 }
 
+export type VideoStage = 'script' | 'voice' | 'subs' | 'storyboard' | 'done'
+
+export interface VideoStoryboardInfo {
+  shots: number
+  totalSec: number
+  at: string
+}
+
+/** 视频生产流水线状态（产线概念升级自 MoneyPrinterTurbo） */
+export interface VideoInfo {
+  stage?: VideoStage
+  voice?: string
+  rate?: number
+  sentences?: number
+  durationSec?: number
+  updatedAt?: string
+  storyboard?: VideoStoryboardInfo
+  composeMode?: 'storyboard' | 'legacy'
+}
+
+/** 某一平台发布包落盘记录（适配器只生成草稿包，不点发布）。 */
+export interface PublishPackInfo {
+  pack: string
+  at: string
+  title: string
+  source: 'article' | 'script'
+}
+
 export interface EpisodeMeta {
   slug: string
   title: string
@@ -61,6 +103,11 @@ export interface EpisodeMeta {
   createdAt: string
   updatedAt: string
   platforms: Partial<Record<PlatformKey, PlatformInfo>>
+  video?: VideoInfo
+  tags?: string[]
+  publish?: Partial<Record<PlatformKey, PublishPackInfo>>
+  memory?: MemoryEntry[]
+  qc?: QcInfo
 }
 
 export interface EpisodeFiles {
@@ -68,6 +115,7 @@ export interface EpisodeFiles {
   script: string
   article: string
   subs: string
+  storyboard: string
 }
 
 export interface EpisodeView {
@@ -142,6 +190,91 @@ export function safeItemDir(root: string, slug: string): string | null {
   return dir
 }
 
+function sanitizeVideo(raw: unknown): VideoInfo | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const o = raw as Record<string, unknown>
+  const out: VideoInfo = {}
+  if (o.stage === 'script' || o.stage === 'voice' || o.stage === 'subs' || o.stage === 'storyboard' || o.stage === 'done') out.stage = o.stage
+  if (typeof o.voice === 'string' && o.voice) out.voice = o.voice
+  if (typeof o.rate === 'number' && Number.isFinite(o.rate) && o.rate > 0) out.rate = Math.floor(o.rate)
+  if (typeof o.sentences === 'number' && Number.isFinite(o.sentences) && o.sentences >= 0) out.sentences = Math.floor(o.sentences)
+  if (typeof o.durationSec === 'number' && Number.isFinite(o.durationSec) && o.durationSec >= 0) out.durationSec = Math.round(o.durationSec * 10) / 10
+  if (typeof o.updatedAt === 'string' && o.updatedAt) out.updatedAt = o.updatedAt
+  if (o.composeMode === 'storyboard' || o.composeMode === 'legacy') out.composeMode = o.composeMode
+  if (o.storyboard && typeof o.storyboard === 'object') {
+    const s = o.storyboard as Record<string, unknown>
+    const sb: VideoStoryboardInfo = { shots: 0, totalSec: 0, at: '' }
+    if (typeof s.shots === 'number' && Number.isFinite(s.shots) && s.shots >= 0) sb.shots = Math.floor(s.shots)
+    if (typeof s.totalSec === 'number' && Number.isFinite(s.totalSec) && s.totalSec >= 0) sb.totalSec = Math.round(s.totalSec * 10) / 10
+    if (typeof s.at === 'string' && s.at) sb.at = s.at
+    if (sb.shots || sb.totalSec || sb.at) out.storyboard = sb
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+function sanitizeTags(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const tags = raw
+    .filter((t): t is string => typeof t === 'string')
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .slice(0, 20)
+  return tags
+}
+
+function sanitizePublish(raw: unknown): EpisodeMeta['publish'] | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const out: NonNullable<EpisodeMeta['publish']> = {}
+  for (const key of PLATFORM_KEYS) {
+    const p = (raw as Record<string, unknown>)[key]
+    if (!p || typeof p !== 'object') continue
+    const o = p as Record<string, unknown>
+    const source = o.source === 'script' ? 'script' : o.source === 'article' ? 'article' : ''
+    const pack = typeof o.pack === 'string' ? o.pack : ''
+    const at = typeof o.at === 'string' ? o.at : ''
+    const title = typeof o.title === 'string' ? o.title : ''
+    if (!pack && !at && !title && !source) continue
+    out[key] = {
+      pack: pack || `publish/${key}.md`,
+      at,
+      title,
+      source: source || 'article',
+    }
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+function sanitizeMemory(raw: unknown): MemoryEntry[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const out: MemoryEntry[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const o = item as Record<string, unknown>
+    const at = typeof o.at === 'string' ? o.at : ''
+    const file = typeof o.file === 'string' ? o.file : ''
+    const summary = typeof o.summary === 'string' ? o.summary : ''
+    if (!at && !file && !summary) continue
+    out.push({ at, file, summary })
+  }
+  return out.length ? out.slice(-8) : undefined
+}
+
+function sanitizeQc(raw: unknown): QcInfo | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const o = raw as Record<string, unknown>
+  const verdict = o.verdict === '通过' || o.verdict === '建议修改' ? o.verdict : ''
+  if (!verdict) return undefined
+  const notes = Array.isArray(o.notes)
+    ? o.notes.filter((n): n is string => typeof n === 'string').map((n) => n.trim()).filter(Boolean).slice(0, 3)
+    : []
+  return {
+    file: typeof o.file === 'string' ? o.file : '',
+    at: typeof o.at === 'string' ? o.at : '',
+    notes,
+    verdict,
+  }
+}
+
 export async function readMeta(root: string, slug: string): Promise<EpisodeMeta | null> {
   const dir = safeItemDir(root, slug)
   if (!dir) return null
@@ -155,7 +288,16 @@ export async function readMeta(root: string, slug: string): Promise<EpisodeMeta 
       createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : nowIso(),
       updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : nowIso(),
       platforms: sanitizePlatforms(raw.platforms),
+      video: sanitizeVideo(raw.video),
     }
+    const tags = sanitizeTags(raw.tags)
+    if (tags) meta.tags = tags
+    const publish = sanitizePublish(raw.publish)
+    if (publish) meta.publish = publish
+    const memory = sanitizeMemory(raw.memory)
+    if (memory) meta.memory = memory
+    const qc = sanitizeQc(raw.qc)
+    if (qc) meta.qc = qc
     return meta
   } catch {
     return null
@@ -241,11 +383,12 @@ export async function getEpisode(root: string, slug: string): Promise<EpisodeVie
   if (!dir) return null
   const meta = await readMeta(root, slug)
   if (!meta) return null
-  const [topic, script, article, subs] = await Promise.all([
+  const [topic, script, article, subs, storyboard] = await Promise.all([
     readText(join(dir, FILE_NAMES.topic)),
     readText(join(dir, FILE_NAMES.script)),
     readText(join(dir, FILE_NAMES.article)),
     readText(join(dir, FILE_NAMES.subs)),
+    readText(join(dir, 'storyboard.md')),
   ])
   let coverExt = ''
   let hasCover = false
@@ -257,7 +400,33 @@ export async function getEpisode(root: string, slug: string): Promise<EpisodeVie
     }
   }
   const hasVideo = await exists(join(dir, 'video.mp4'))
-  return { meta, dir, files: { topic, script, article, subs }, hasCover, coverExt, hasVideo }
+  return { meta, dir, files: { topic, script, article, subs, storyboard }, hasCover, coverExt, hasVideo }
+}
+
+/** 封面相对文件名（cover.png 等），没有则空串。 */
+export async function findCoverFile(dir: string): Promise<string> {
+  for (const ext of ['png', 'jpg', 'jpeg', 'webp']) {
+    const name = `cover.${ext}`
+    if (await exists(join(dir, name))) return name
+  }
+  return ''
+}
+
+/** 合并写回某一平台的发布包记录。 */
+export async function updatePublishInfo(
+  root: string,
+  slug: string,
+  platform: PlatformKey,
+  info: PublishPackInfo,
+): Promise<EpisodeMeta> {
+  const dir = safeItemDir(root, slug)
+  if (!dir) throw new Error('非法 slug')
+  const meta = await readMeta(root, slug)
+  if (!meta) throw new Error(`找不到内容：${slug}`)
+  meta.publish = { ...(meta.publish ?? {}), [platform]: info }
+  meta.updatedAt = nowIso()
+  await writeFile(join(dir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8')
+  return meta
 }
 
 export async function createEpisode(root: string, title: string, topic?: string): Promise<EpisodeMeta> {
@@ -298,9 +467,34 @@ export async function writeEpisodeFile(
   } else {
     await writeFile(path, body.endsWith('\n') ? body : `${body}\n`, 'utf8')
   }
+  meta.memory = appendMemory(meta.memory, makeMemoryEntry(FILE_NAMES[file], body))
   meta.updatedAt = nowIso()
   await writeFile(join(dir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8')
   return path
+}
+
+/** 追加一条记忆（FIFO 8）。content_write 成功路径也会走 writeEpisodeFile。 */
+export async function updateMemory(root: string, slug: string, entry: MemoryEntry): Promise<EpisodeMeta> {
+  const dir = safeItemDir(root, slug)
+  if (!dir) throw new Error('非法 slug')
+  const meta = await readMeta(root, slug)
+  if (!meta) throw new Error(`找不到内容：${slug}`)
+  meta.memory = appendMemory(meta.memory, entry)
+  meta.updatedAt = nowIso()
+  await writeFile(join(dir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8')
+  return meta
+}
+
+/** 写入被动质检结果。 */
+export async function updateQc(root: string, slug: string, qc: QcInfo): Promise<EpisodeMeta> {
+  const dir = safeItemDir(root, slug)
+  if (!dir) throw new Error('非法 slug')
+  const meta = await readMeta(root, slug)
+  if (!meta) throw new Error(`找不到内容：${slug}`)
+  meta.qc = qc
+  meta.updatedAt = nowIso()
+  await writeFile(join(dir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8')
+  return meta
 }
 
 export interface StatusPatch {
@@ -344,6 +538,18 @@ export async function updateEpisode(root: string, slug: string, patch: StatusPat
     }
     meta.platforms[key] = info
   }
+  meta.updatedAt = nowIso()
+  await writeFile(join(dir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8')
+  return meta
+}
+
+/** 更新视频产线状态（合并写回，bump updatedAt）。 */
+export async function updateVideoInfo(root: string, slug: string, patch: VideoInfo): Promise<EpisodeMeta> {
+  const dir = safeItemDir(root, slug)
+  if (!dir) throw new Error('非法 slug')
+  const meta = await readMeta(root, slug)
+  if (!meta) throw new Error(`找不到内容：${slug}`)
+  meta.video = { ...(meta.video ?? {}), ...patch, updatedAt: nowIso() }
   meta.updatedAt = nowIso()
   await writeFile(join(dir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8')
   return meta
