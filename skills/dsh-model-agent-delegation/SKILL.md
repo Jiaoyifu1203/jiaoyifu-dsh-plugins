@@ -1,6 +1,6 @@
 ---
 name: dsh-model-agent-delegation
-description: model_agent 全权委派的组合分工操作路径。用户说「用 grok agent 完成任务」「交给子代理」「全权委托」时，走 model_agent 工具整包委派：执行模型（grok 登录账户 / deepseek-v4-flash / deepseek-v4-pro）首次由用户选定后落盘沿用，每次委派前向用户明确当前模型，换模型通过对话（model_agent_config 或 model 参数）完成；grok 子代理负责读文件/跑命令/调研/实现，DSH 插件工具（content_*/track_*/vision_*/skill_*/scout）环节由父代理代办。触发词：用 grok agent、grok agent 全权委托、交给 grok、交给子代理、全权委托、用哪个模型、换模型、model_agent。不在普通单步任务（查个文件、改一行代码）时触发——只在用户明确要求整包委派或调整委派模型时激活。
+description: model_agent 全权委派的组合分工操作路径，承载 DSH 环境级全局约束「执行类工作一律交付子代理」。用户说「用 grok agent 完成任务」「交给子代理」「全权委托」时走 model_agent 工具整包委派；按全局约束，写文件/跑命令/改代码/调研/实现/验证/交付等执行类工作也默认交付子代理（父代理只规划、委派、核对、插件代办）。执行模型（grok 登录账户 / deepseek-v4-flash / deepseek-v4-pro）首次由用户选定后落盘沿用，每次委派前向用户明确当前模型，换模型通过对话（model_agent_config 或 model 参数）完成；grok 子代理负责读文件/跑命令/调研/实现，DSH 插件工具（content_*/track_*/vision_*/skill_*/scout）环节由父代理代办。触发词：用 grok agent、grok agent 全权委托、交给 grok、交给子代理、全权委托、执行类工作、用哪个模型、换模型、model_agent。
 ---
 
 # model_agent 全权委派 · 组合分工操作路径
@@ -21,6 +21,8 @@ description: model_agent 全权委派的组合分工操作路径。用户说「�
 4. **换模型（对话调整）**：用户说「换 grok」「用 flash」→ `model_agent_config {model}` 改默认；或单次委派时给 `model_agent` 传 `model` 参数（也会成为新默认）。
 
 ## 2. 分工铁律
+
+> **全局约束（2026-08-18）**：DSH 环境内执行类工作一律交付子代理——父代理不亲自写文件/跑命令/改代码/调研/实现/验证/交付；豁免：读约束文件、核对交付、写交接包、插件代办、汇报。环境级权威：`~/.dsh/AGENTS.md`。
 
 | 环节 | 谁执行 |
 |---|---|

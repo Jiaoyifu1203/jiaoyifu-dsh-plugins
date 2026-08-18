@@ -5,8 +5,8 @@
  * 1. 对话桥（v1）：飞书私聊 ↔ 每用户独立 agent 会话；
  * 2. 监管：/tasks 列出 dsh 内全部会话，任务结束/出错自动推送飞书；
  * 3. 介入 + 审批：/steer 把指令注入任意会话（运行中 steer、空闲 followup）；
- *    approval/request 瀑布以 prepend 注册，抢在浏览器之前接管审批，
- *    把审批问题推飞书，用户回「批准/拒绝」决定。
+ *    旁听 Web mux 的 approval/requested，飞书与浏览器同时显示，
+ *    任一端先答生效（先到先得）。
  *
  * 安全：App Secret 只走环境变量 FEISHU_APP_SECRET（plugins/feishu.env）。
  */
@@ -49,10 +49,12 @@ export interface Config {
   progressFirstAfterMs: number
   /** 进度推送最小间隔（毫秒） */
   progressIntervalMs: number
-  /** 审批最长等待（毫秒），超时 fail-closed 并通知 */
+  /** 审批最长等待（毫秒），超时只清飞书 pending，不自动拒绝 */
   approvalTimeoutMs: number
   /** 监管轮询间隔（毫秒） */
   pollIntervalMs: number
+  /** Web 控制台基址（仅 127.0.0.1）；拿不到 ctx.webServer.port 时用 */
+  webBaseUrl: string
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -72,6 +74,7 @@ export const Config: Schema<Config> = Schema.object({
   progressIntervalMs: Schema.number().default(180000),
   approvalTimeoutMs: Schema.number().default(1800000),
   pollIntervalMs: Schema.number().default(5000),
+  webBaseUrl: Schema.string().default('http://127.0.0.1:3080'),
 })
 
 interface AgentRecord {
@@ -108,6 +111,7 @@ export function apply(ctx: Context, config: Config): void {
   const progressIntervalMs = config.progressIntervalMs ?? 180000
   const approvalTimeoutMs = config.approvalTimeoutMs ?? 1800000
   const pollIntervalMs = config.pollIntervalMs ?? 5000
+  const webBaseUrl = (config.webBaseUrl ?? 'http://127.0.0.1:3080').trim() || 'http://127.0.0.1:3080'
 
   if (!appId || !secret) {
     console.warn(
@@ -250,11 +254,12 @@ export function apply(ctx: Context, config: Config): void {
     send: (chatId: string, text: string) => send(chatId, text).catch(() => {}),
   })
 
-  // ---------- 审批接管（prepend 抢在浏览器之前） ----------
+  // ---------- 审批双端同步（旁听 mux，不抢瀑布） ----------
   const approver: Approver = createApprover({
     ctx,
     approvalTimeoutMs,
     adminId,
+    webBaseUrl,
     send: (chatId: string, text: string) => send(chatId, text).catch(() => {}),
   })
 
@@ -323,7 +328,7 @@ export function apply(ctx: Context, config: Config): void {
       if (approveMatch) {
         const word = approveMatch[1].toLowerCase()
         const ok = ['批准', '同意', '允许', 'approve', 'y'].includes(word)
-        await send(userId, approver.answer(ok, approveMatch[2]), messageId)
+        await send(userId, await approver.answer(ok, approveMatch[2]), messageId)
         return
       }
     }

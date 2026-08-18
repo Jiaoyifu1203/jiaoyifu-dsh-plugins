@@ -66,6 +66,7 @@ npx --yes @deepseek-ai/dsh plugin --profile web add @deepseek-ai/dsh-subagent-ac
 | `configPath` | `~/.dsh/model-agent.json` | 模型默认配置落盘路径 |
 | `defaultModel` | 空 | 首次默认模型；空 = 首次委派时问用户 |
 | `requireApproval` | `true` | 委派前审批门（Web 弹窗 + 飞书镜像双端可见，批准才执行）；`false` 关闭 |
+| `heartbeatMs` | `30000` | 委派进行中每 N 毫秒更新 Web 待办条（`[grok委派] 进行中 · 已 Xs · 最近工具`），不进对话、不会 abort |
 | `models` | 内置三档 | 自定义模型表（kind: spawn/acp + provider + agentOptions） |
 
 ## 能力边界（ACP 档）
@@ -80,3 +81,12 @@ spawn 档（flash/pro）子代理运行在 harness 内部，天然拥有全部�
 
 - DSH（`@deepseek-ai/dsh`）0.1.0-rc 系列；grok 档需 grok CLI 已登录（`grok` 命令可用）
 - spawn 档需已配置 deepseek 模型 provider（如 deepseek-official）
+
+## grok 委派为何会「失败」（2026-08-17 实测）
+
+ACP `initialize` / `session/new` 本身是通的。会话日志里真正让用户觉得失败的是：
+
+1. **子代理读到工作区 AGENTS.md**，先出任务识别卡/收尾门，不干活（`session-5bc51615` 首次委派）。现已在 prompt 前加执行合同，并给 grok CLI 加 `--rules`。
+2. **`Error: tool call aborted`**：父会话取消或重启启动器，子进程被杀掉。
+3. **历史 `unknown tool grok_agent`**：临时补丁没进 `start-web.sh`。现役入口是 `model_agent` + `cordis.yml` 的 `grok-acp-provider`。
+4. **审批门**：`requireApproval: true` 时 Web/飞书都要点批准；只点一端、或取消，会返回「委派未执行」。

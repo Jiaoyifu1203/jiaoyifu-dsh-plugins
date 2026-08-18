@@ -8,7 +8,7 @@
 |---|---|---|
 | 对话桥 | 私聊消息 → 独立 agent 会话（同 Web UI 模型/技能/插件），回复回传 | 直接发消息 |
 | 监管 | 列出全部会话 / 任务结束·出错自动推送 | `/tasks`；自动推送 |
-| 介入+审批 | 给任意会话派指令；审批问题推飞书、回「批准/拒绝」决定 | `/steer`；审批时自动推 |
+| 介入+审批 | 给任意会话派指令；审批同时出现在飞书和 Web UI，任一端先答生效 | `/steer`；审批时自动推 |
 
 ## 飞书命令（私聊）
 
@@ -18,7 +18,7 @@
 | `/tasks` | 全部活会话：序号、运行中/空闲、标题、目录、已运行时长 |
 | `/steer <序号|会话id> <指令>` | 介入：运行中的会话注入当前步骤（steer），空闲的派发新任务（followup） |
 | `/ws [绝对路径]` | 工作区切换：不带参数看当前；带路径切到该目录（每用户独立，/reset 后新会话生效） |
-| `批准 [短号]` / `拒绝 [短号]` | 审批决定；不带短号默认最新一条；超时 30 分钟自动拒绝（fail-closed） |
+| `批准 [短号]` / `拒绝 [短号]` | 审批决定；不带短号默认最新一条；超时只取消飞书等待，不自动拒绝 |
 | `/reset` | 重置自己的对话会话 |
 | 其他文本 | 自己的会话任务（每用户独立上下文） |
 
@@ -33,9 +33,17 @@
 
 飞书是服务端会话：同一个私聊在手机、电脑、iPad 上天然同步（同一份聊天记录）。另外飞书起的每个会话都是 dsh 的正式会话，**Web UI 侧栏也能看到同一条对话**（含轨迹），两边都可以继续操作。
 
-## 审批接管机制
+## 审批双端同步
 
-插件以 `prepend: true` 注册 `approval/request` 瀑布监听，**抢在浏览器弹窗之前**接管审批：有绑定管理员（第一个私聊用户自动绑定，落盘 `~/.dsh/feishu-admin.json`，或配 `adminOpenIds`）就把审批问题推飞书等待决定；无管理员则 `next()` 交还浏览器，Web UI 弹窗照常。
+插件**不再**抢占 `approval/request` 瀑布。浏览器答案器（`dsh-host-apiproxy`）照常认领请求并弹 Web UI；本插件旁听同一条 mux 流（`GET /api/events.mux`），把 `approval/requested` 推给飞书管理员。
+
+- 飞书和 Web UI **同时**看到同一条审批；
+- 任一端先答生效（`POST /api/respond`；第二次返回 `not-pending`）；
+- 飞书回「批准/拒绝 [短号]」走同一接口，Web 对话框同步关闭；
+- Web 先点了 → 飞书补一句「已在 Web 端处理」；
+- `approvalTimeoutMs` 到期只清飞书 pending 并提示「⏰ 等待超时」，**不**自动拒绝（Web 端可能还在等点击）；
+- mux 打开会重放仍 pending 的审批（同 rpcId），重连按 `approvalId` 去重；
+- 无绑定管理员时只走 Web UI，不推飞书。管理员绑定方式不变：首个私聊用户自动绑定（`~/.dsh/feishu-admin.json`）或配 `adminOpenIds`。
 
 ## 行为与安全
 
@@ -58,8 +66,9 @@
 | `notifyTurnStart` | `false` | 任务开始推飞书（易刷屏） |
 | `progressFirstAfterMs` | `60000` | 运行多久后开始报进度 |
 | `progressIntervalMs` | `180000` | 进度推送最小间隔 |
-| `approvalTimeoutMs` | `1800000` | 审批等待上限（毫秒），超时 fail-closed |
+| `approvalTimeoutMs` | `1800000` | 审批等待上限（毫秒），超时只清飞书等待、不自动拒绝 |
 | `pollIntervalMs` | `5000` | 监管轮询间隔 |
+| `webBaseUrl` | `http://127.0.0.1:3080` | Web 控制台基址（仅回环）。优先 `ctx.webServer.port`，拿不到才用这项 |
 | `idleTimeoutMs` | `600000` | 单轮对话最长等待 |
 | `maxReplyChars` / `interimMessage` / `resetCommands` | — | 同 v1 |
 
@@ -68,10 +77,10 @@
 1. 本机重启 `./scripts/start-web.sh`（`--profile web --patch` 形式，见仓库 README）。
 2. 日志出现 `[jiaoyifu-feishu] ✅ 飞书长连接已建立（onReady）` = 连接成功；出现 ❌ 则按错误信息排查。
 3. 飞书私聊发 `/ping` → 收到「✅ 飞书桥在线」；发 `/tasks` → 看到全部会话；发普通消息 → 正常任务回复。
-4. Web UI 起一个会触发审批的任务（如改沙箱外文件）→ 飞书收到 🔐 审批请求 → 回「批准」→ 任务继续。
+4. Web UI 起一个会触发审批的任务（如改沙箱外文件）→ 飞书收到 🔐 且浏览器同时弹窗 → 任一端回答 → 另一端关闭或提示已处理。
 
 ## 铁律
 
 - 密钥只进 `plugins/feishu.env`（gitignore、chmod 600），不进仓库/cordis.yml；
-- 失败软着陆：缺凭据只警告不崩启动；resume 失败降级新建；无管理员时审批交还浏览器；
+- 失败软着陆：缺凭据只警告不崩启动；resume 失败降级新建；mux 断开 5s 重连；无管理员时只走 Web UI；
 - 长连接模式一个应用同时只能一个客户端在线：别同时跑两个 dsh web 实例（会互踢）。

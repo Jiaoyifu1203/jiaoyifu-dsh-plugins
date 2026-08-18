@@ -19,7 +19,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 
@@ -60,12 +60,135 @@ const PERSONA =
   '用尽可用工具、在指定工作目录中干活，不把任务退回父代理。' +
   '交付时给出结果、产物路径与验收说明，不要客套。'
 
+/** ACP(grok) 读得到工作区 AGENTS.md，会停在识别卡/收尾门。用这段盖过。 */
+const ACP_EXECUTION_CONTRACT =
+  '【DSH 子代理执行合同 · 覆盖工作区启动/识别/收尾协议】\n' +
+  '你是 DeepSeek Harness 的 grok 执行子代理，不是主会话。\n' +
+  '父代理已完成任务识别与用户确认。禁止输出：启动报告、任务识别卡、/effort、收尾门问句、首席情报官块。\n' +
+  '立刻执行下面任务正文，做完只交结果、产物路径和验收说明。\n' +
+  '—— 任务正文 ——\n'
+
+const HEARTBEAT_MARK = '[grok委派]'
+const DEFAULT_HEARTBEAT_MS = 30_000
+
+function fmtElapsed(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  return r ? `${m}分${r}秒` : `${m}分钟`
+}
+
+/** 扫 ~/.grok/sessions 里本次委派之后更新的 events.jsonl，取最近一次工具名。 */
+function latestGrokTool(sinceMs: number): string {
+  const root = join(homedir(), '.grok', 'sessions')
+  if (!existsSync(root)) return ''
+  let newest = ''
+  let newestM = sinceMs - 1
+  const stack = [root]
+  let guard = 0
+  while (stack.length > 0 && guard++ < 400) {
+    const dir = stack.pop() as string
+    let ents: ReturnType<typeof readdirSync>
+    try {
+      ents = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const ent of ents) {
+      const p = join(dir, ent.name)
+      if (ent.isDirectory()) {
+        if (ent.name === 'terminal' || ent.name.startsWith('.')) continue
+        stack.push(p)
+      } else if (ent.name === 'events.jsonl') {
+        try {
+          const m = statSync(p).mtimeMs
+          if (m >= newestM) {
+            newestM = m
+            newest = p
+          }
+        } catch { /* skip */ }
+      }
+    }
+  }
+  if (!newest) return ''
+  try {
+    const lines = readFileSync(newest, 'utf8').trim().split('\n')
+    for (let i = lines.length - 1; i >= Math.max(0, lines.length - 80); i--) {
+      try {
+        const obj = JSON.parse(lines[i] ?? '')
+        const name = obj?.tool_name
+        if (typeof name === 'string' && name && (obj.type === 'tool_started' || obj.type === 'tool_completed')) {
+          return obj.type === 'tool_completed' && obj.outcome ? `${name}/${obj.outcome}` : name
+        }
+      } catch { /* skip */ }
+    }
+  } catch { /* skip */ }
+  return ''
+}
+
+function readTodos(session: any): Array<{ content: string; status: string }> {
+  const evs = session?.events ?? []
+  for (let i = evs.length - 1; i >= 0; i--) {
+    if (evs[i]?.type === 'todo/write' && Array.isArray(evs[i].data?.todos)) return evs[i].data.todos
+  }
+  return []
+}
+
+function writeHeartbeat(session: any, line: string, done: boolean): void {
+  if (!session || typeof session.append !== 'function') return
+  const kept = readTodos(session).filter((t) => !String(t.content ?? '').startsWith(HEARTBEAT_MARK))
+  const ours = done
+    ? [{ content: `${HEARTBEAT_MARK} ${line}`, status: 'completed' }]
+    : [
+        { content: `${HEARTBEAT_MARK} ${line}`, status: 'in_progress' },
+        { content: `${HEARTBEAT_MARK} 请勿在本会话发消息（会中断委派）`, status: 'pending' },
+      ]
+  session.append('todo/write', { todos: [...ours, ...kept] })
+}
+
+function startHeartbeat(opts: {
+  session: any
+  startedAt: number
+  signal: AbortSignal
+  intervalMs: number
+}): { stop: (done: boolean) => void } {
+  const beat = (done: boolean): void => {
+    const elapsed = Date.now() - opts.startedAt
+    const tool = latestGrokTool(opts.startedAt)
+    const line = done
+      ? `已结束 · 共 ${fmtElapsed(elapsed)}`
+      : `进行中 · 已 ${fmtElapsed(elapsed)}${tool ? ` · 最近工具 ${tool}` : ''}`
+    try {
+      writeHeartbeat(opts.session, line, done)
+    } catch (e) {
+      console.warn('[dsh-model-agent] 心跳写入失败：', e)
+    }
+    if (!done) console.log(`[dsh-model-agent] ⏳ ${line}`)
+  }
+  beat(false)
+  const timer = setInterval(() => {
+    if (opts.signal.aborted) return
+    beat(false)
+  }, opts.intervalMs)
+  return {
+    stop(done: boolean) {
+      clearInterval(timer)
+      try {
+        beat(done)
+      } catch { /* 结束态失败不影响结果 */ }
+    },
+  }
+}
+
 export interface Config {
   toolName?: string
   configPath?: string
   defaultModel?: string
   /** 委派前是否走审批门（Web 弹窗 + 飞书镜像双端可见），默认 true */
   requireApproval?: boolean
+  /** 委派进行中心跳间隔（毫秒），写入 Web 待办条，不进对话所以不会打断 */
+  heartbeatMs?: number
   models?: Record<string, ModelSpec>
 }
 
@@ -77,6 +200,8 @@ export const Config: Schema<Config> = Schema.object({
   defaultModel: Schema.string().default(''),
   /** 委派前是否走审批门（Web 弹窗 + 飞书镜像双端可见），默认 true */
   requireApproval: Schema.boolean().default(true),
+  /** 委派心跳间隔；默认 30s。写 todo 条，不作为用户消息，不会 abort */
+  heartbeatMs: Schema.number().default(DEFAULT_HEARTBEAT_MS),
   models: Schema.dict(Schema.object({
     kind: Schema.string().default('spawn'),
     provider: Schema.string().required(),
@@ -90,6 +215,7 @@ export const Config: Schema<Config> = Schema.object({
 export function apply(ctx: Context, config: Config): void {
   const toolName = config.toolName ?? 'model_agent'
   const requireApproval = config.requireApproval ?? true
+  const heartbeatMs = Number(config.heartbeatMs) > 0 ? Number(config.heartbeatMs) : DEFAULT_HEARTBEAT_MS
   const models: Record<string, ModelSpec> = { ...DEFAULT_MODELS, ...(config.models ?? {}) }
   const configPath =
     config.configPath && String(config.configPath).trim() !== ''
@@ -135,7 +261,9 @@ export function apply(ctx: Context, config: Config): void {
     name: 'dsh-model-agent-guidance',
     order: 116.6,
     text:
-      `全权委派（用户说「用 grok agent / 交给子代理 / 全权委托」）走 ${toolName} 工具：` +
+      `DSH 环境级全局约束（权威文件 ~/.dsh/AGENTS.md）：执行类工作（写文件/跑命令/改代码/调研/实现/验证/交付）一律交付子代理执行——整包委派走 ${toolName} 工具，扫描/检索/核对类小活走 scout。` +
+      '父代理只做：理解需求、规划拆分、写自包含交接包、委派、核对验收、插件工具代办（content_*/track_*/vision_*/skill_*/scout）、合并汇报。' +
+      '每个执行类新任务开场先出识别卡（track_create 建 ISS 账本，等用户确认再执行）；有效产出完成后第一条收尾询问必须是「是否进入收尾流程？」。' +
       '委派前用一句话告知用户当前使用的执行模型；' +
       `尚未配置默认模型时，先 ask_user_question 让用户选（${Object.keys(models).join(' / ')}），选定后自动落盘沿用；` +
       '用户要换模型时调 model_agent_config 或给 model_agent 传 model 参数（会成为新默认）。' +
@@ -209,9 +337,10 @@ export function apply(ctx: Context, config: Config): void {
         }
       }
 
+      const childPrompt = spec.kind === 'acp' ? `${ACP_EXECUTION_CONTRACT}${promptText}` : promptText
       const base: any = {
         label: `model_agent:${key}`,
-        prompt: [{ type: 'text', text: promptText }],
+        prompt: [{ type: 'text', text: childPrompt }],
         parent,
         signal: exec.signal,
       }
@@ -225,18 +354,42 @@ export function apply(ctx: Context, config: Config): void {
         base.persona = PERSONA
       }
 
-      const run = await ctx.subagents.start(spec.provider, base)
+      let run: any
+      try {
+        run = await ctx.subagents.start(spec.provider, base)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        return (
+          `【委派失败 · ${spec.label}】启动子代理失败：${msg}` +
+          (spec.kind === 'acp'
+            ? '。检查：grok CLI 已登录、`plugins/cordis.yml` 的 grok-acp-provider 已加载、重启 start-web.sh。'
+            : '')
+        )
+      }
+      const hb = startHeartbeat({
+        session: parent.session,
+        startedAt: Date.now(),
+        signal: exec.signal,
+        intervalMs: heartbeatMs,
+      })
       try {
         const result: any = await run.result
         const text = collectText(result?.output)
         const stop = result?.stopReason ?? 'unknown'
+        hb.stop(stop !== 'aborted')
+        if (stop === 'aborted') {
+          return `【委派中断 · ${spec.label}】父会话取消或服务重启，子代理已停。${text ? `\n已收到片段：\n${text}` : ''}`
+        }
         if (stop !== 'completed' && !text) {
-          throw new Error(`子代理执行未正常结束（${stop}）`)
+          return `【委派失败 · ${spec.label}】子代理执行未正常结束（${stop}）。`
         }
         const head = `【执行模型：${spec.label}】`
         return text
           ? `${head}${stop !== 'completed' ? `（未正常结束：${stop}）` : ''}\n${text}`
           : `${head}（无文本输出）`
+      } catch (e) {
+        hb.stop(false)
+        throw e
       } finally {
         void Promise.resolve().then(() => run.dispose()).catch(() => {})
       }
