@@ -13,6 +13,14 @@
 
 状态：Pi 已通（/login DeepSeek 后 V4 可选）。dsh 走官方 `npx @deepseek-ai/dsh web`，启动脚本是 `scripts/start-web.sh`。不克隆源码仓。
 
+## 2026-08-19 内容工作台升级：工作->内容桥（jiaoyifu-studio 收割器落地）
+
+- 做了什么：jiaoyifu-studio 新增任务收割器，把 track 任务产出自动建成一期内容（topic.md 素材包）。
+- 四源素材包：任务账本 + 任务线验收 + git 提交 + CONTEXT.md 日期锚点；工具 `content_from_task`，面板「⚡ 从任务」走 `/api/tasks` + `/api/from-task`。
+- 双向关联：episode `meta.sourceTask` ↔ 任务 ID（上限 10）；收尾门提示是否收割为内容选题，建议 `track_update` 回链。
+- 收尾门联动：`~/.dsh/AGENTS.md` §3 新增第 4 条；`jiaoyifu-task-paradigm` PROTOCOL_TEXT【收尾·状态】追加收割提示。
+- 提交哈希：待 push 后补。
+
 ## 2026-08-19 widget-dock 自适应补丁（社区插件本地定制首例）
 
 - 动因：widget-dock 卡片显示门槛 180px 空白，窄窗口全收起只剩右缘小竖条（用户实测「必须全屏才能看到」），要求自适应。

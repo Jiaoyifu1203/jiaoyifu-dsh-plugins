@@ -16,7 +16,7 @@ export const PANEL_HTML = `<!doctype html>
 <title>内容工作台 · Jiaoyifu Studio</title>
 <style>
 :root{
-  --bg:#0b0e14; --panel:#12161f; --panel2:#171c27; --border:#252c3a;
+  --bg:#0b0e14; --panel:#12161f; --panel2:#171c27; --card:#12161f; --border:#252c3a;
   --text:#e6edf3; --muted:#8b949e; --accent:#4d6bfe;
   --green:#3fb950; --amber:#d29922; --blue:#58a6ff; --red:#f85149;
 }
@@ -134,6 +134,15 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--accent);padding:8px 18px;border-radius:999px;opacity:0;transition:opacity .25s;pointer-events:none;font-size:13px;z-index:99}
 .toast.show{opacity:1}
 
+.mask{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50;display:flex;align-items:center;justify-content:center;padding:24px}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:14px;width:min(720px,100%);max-height:80vh;display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,.4)}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);font-weight:650}
+.modal-body{overflow-y:auto;padding:10px 12px}
+.task-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border-radius:10px;border:1px solid transparent}
+.task-row:hover{background:var(--panel2)}
+.task-main{min-width:0;flex:1;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.pill.harvested{background:rgba(110,118,129,.15);color:#9aa3ad;border:1px solid rgba(110,118,129,.4)}
+
 .hint{font-size:12.5px;color:var(--muted);background:rgba(77,107,254,.08);border:1px solid rgba(77,107,254,.3);border-radius:8px;padding:8px 12px;margin-bottom:14px}
 @media (max-width:900px){
   .main{flex-direction:column}
@@ -157,6 +166,7 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     <div class="side-tools">
       <input class="search" id="search" placeholder="搜索标题 / slug…" data-act="search">
       <button class="btn primary" data-act="new-item" title="新建一期内容">＋ 新建</button>
+      <button class="btn" data-act="from-task" title="从任务账本收割为新内容">⚡ 从任务</button>
     </div>
     <div class="items" id="items"></div>
     <div class="side-foot" id="side-foot">加载中…</div>
@@ -467,6 +477,14 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     else html += '<div class="topic-text" style="color:var(--muted)">（还没有选题：在 DSH 对话里说「帮我定这一期的选题，写进 topic.md」）</div>';
     html += '</div>';
 
+    if (item.sourceTask && item.sourceTask.length) {
+      html += '<div class="card"><h3>🔗 来源任务</h3>';
+      for (var si = 0; si < item.sourceTask.length; si++) {
+        html += pill(item.sourceTask[si], 'st-ready') + ' ';
+      }
+      html += '</div>';
+    }
+
     html += '<div class="card"><h3>📺 多平台发布状态 <span class="file">meta.json · publish/</span></h3>';
     html += '<div class="vcontrols" style="margin-bottom:12px">';
     html += '<button class="btn primary" data-act="publish-pack"' + (busy ? ' disabled' : '') + '>' + (busy === 'pack' ? '生成中…' : '生成发布包') + '</button>';
@@ -649,6 +667,10 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     else if (act === 'tab') switchTab(elNode.getAttribute('data-tab'));
     else if (act === 'refresh') refreshAll();
     else if (act === 'new-item') createNew();
+    else if (act === 'from-task') openFromTaskModal();
+    else if (act === 'close-from-task') closeFromTaskModal();
+    else if (act === 'from-task-modal') { /* 点弹窗本体不关闭 */ }
+    else if (act === 'harvest-task') harvestTask(elNode.getAttribute('data-id'));
     else if (act === 'copy-command') { if (current) copyText('/content ' + current.slug, '已复制：/content ' + current.slug) }
     else if (act === 'copy-path') { if (current) copyText(current.dir, '已复制目录路径') }
     else if (act === 'start-prep') {
@@ -722,6 +744,60 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     postJson(PANEL_BASE + '/api/status', body).then(function (d) {
       if (d && d.ok) { toast('平台状态已保存'); refreshAll() } else toast((d && d.error) || '保存失败');
     }).catch(function () { toast('保存失败') });
+  }
+  function taskStatusLabel(status) {
+    if (status === 'done') return '已完成';
+    if (status === 'in_progress') return '进行中';
+    if (status === 'canceled' || status === 'cancelled') return '已取消';
+    return '待办';
+  }
+  function taskStatusCls(status) {
+    if (status === 'done') return 'st-pub';
+    if (status === 'in_progress') return 'st-pre';
+    if (status === 'canceled' || status === 'cancelled') return 'st-not';
+    return 'st-ready';
+  }
+  function closeFromTaskModal() {
+    var mask = qs('#from-task-mask');
+    if (mask && mask.parentNode) mask.parentNode.removeChild(mask);
+  }
+  function openFromTaskModal() {
+    fetchJson(PANEL_BASE + '/api/tasks').then(function (data) {
+      if (!data || !data.ok) { toast((data && data.error) || '加载任务失败'); return }
+      var tasks = data.items || [];
+      closeFromTaskModal();
+      var mask = document.createElement('div');
+      mask.className = 'mask';
+      mask.id = 'from-task-mask';
+      mask.setAttribute('data-act', 'close-from-task');
+      var html = '<div class="modal" data-act="from-task-modal">';
+      html += '<div class="modal-head"><span>从任务账本收割</span><button class="btn small" data-act="close-from-task">✕</button></div>';
+      html += '<div class="modal-body">';
+      if (!tasks.length) html += '<p style="color:var(--muted)">暂无任务</p>';
+      for (var i = 0; i < tasks.length; i++) {
+        var t = tasks[i];
+        html += '<div class="task-row">';
+        html += '<div class="task-main"><span class="dslug">' + esc(t.id) + '</span> ' + esc(t.title || '');
+        html += ' ' + pill(taskStatusLabel(t.status), taskStatusCls(t.status));
+        if (t.harvested) html += ' <span class="pill harvested">已收割</span>';
+        html += '</div>';
+        html += '<button class="btn small primary" data-act="harvest-task" data-id="' + esc(t.id) + '">转为内容</button>';
+        html += '</div>';
+      }
+      html += '</div></div>';
+      mask.innerHTML = html;
+      document.body.appendChild(mask);
+    }).catch(function () { toast('无法加载任务列表') });
+  }
+  function harvestTask(taskId) {
+    if (!taskId) return;
+    postJson(PANEL_BASE + '/api/from-task', { taskId: taskId }).then(function (d) {
+      if (d && d.ok) {
+        toast('已新建：' + d.slug);
+        closeFromTaskModal();
+        loadList(d.slug);
+      } else toast((d && d.error) || '收割失败');
+    }).catch(function () { toast('收割失败') });
   }
   function createNew() {
     var title = prompt('新建一期内容：输入标题');

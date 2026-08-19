@@ -103,6 +103,8 @@
         qcModel: "deepseek-v4-flash"
         qcFallbackModel: "deepseek-v4-pro"
         qcTimeoutMs: 15000
+        # 收割 git/CONTEXT 的默认仓库路径
+        workRepo: '/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness'
     # grok 子代理提供方：grok CLI（登录账户 OAuth），model_agent 的 grok 档后端
     - id: grok-acp-provider
       name: '@deepseek-ai/dsh-subagent-acp'

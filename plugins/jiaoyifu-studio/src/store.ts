@@ -105,6 +105,8 @@ export interface EpisodeMeta {
   platforms: Partial<Record<PlatformKey, PlatformInfo>>
   video?: VideoInfo
   tags?: string[]
+  /** 收割来源任务 ID（track.json issues[].id），去重上限 10 */
+  sourceTask?: string[]
   publish?: Partial<Record<PlatformKey, PublishPackInfo>>
   memory?: MemoryEntry[]
   qc?: QcInfo
@@ -222,6 +224,21 @@ function sanitizeTags(raw: unknown): string[] | undefined {
   return tags
 }
 
+function sanitizeSourceTask(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const item of raw) {
+    if (typeof item !== 'string') continue
+    const id = item.trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
+    if (out.length >= 10) break
+  }
+  return out.length ? out : undefined
+}
+
 function sanitizePublish(raw: unknown): EpisodeMeta['publish'] | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const out: NonNullable<EpisodeMeta['publish']> = {}
@@ -292,6 +309,8 @@ export async function readMeta(root: string, slug: string): Promise<EpisodeMeta 
     }
     const tags = sanitizeTags(raw.tags)
     if (tags) meta.tags = tags
+    const sourceTask = sanitizeSourceTask(raw.sourceTask)
+    if (sourceTask) meta.sourceTask = sourceTask
     const publish = sanitizePublish(raw.publish)
     if (publish) meta.publish = publish
     const memory = sanitizeMemory(raw.memory)
@@ -410,6 +429,32 @@ export async function findCoverFile(dir: string): Promise<string> {
     if (await exists(join(dir, name))) return name
   }
   return ''
+}
+
+/** 合并写回 meta 的可选字段（收割器 sourceTask/tags 等），bump updatedAt。 */
+export interface EpisodeMetaPatch {
+  sourceTask?: string[]
+  tags?: string[]
+}
+
+export async function updateEpisodeMeta(root: string, slug: string, patch: EpisodeMetaPatch): Promise<EpisodeMeta> {
+  const dir = safeItemDir(root, slug)
+  if (!dir) throw new Error('非法 slug')
+  const meta = await readMeta(root, slug)
+  if (!meta) throw new Error(`找不到内容：${slug}`)
+  if (patch.sourceTask !== undefined) {
+    const sourceTask = sanitizeSourceTask(patch.sourceTask)
+    if (sourceTask) meta.sourceTask = sourceTask
+    else delete meta.sourceTask
+  }
+  if (patch.tags !== undefined) {
+    const tags = sanitizeTags(patch.tags)
+    if (tags) meta.tags = tags
+    else delete meta.tags
+  }
+  meta.updatedAt = nowIso()
+  await writeFile(join(dir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8')
+  return meta
 }
 
 /** 合并写回某一平台的发布包记录。 */

@@ -41,7 +41,7 @@ const PROTOCOL_TEXT = `DSH 任务交互主线（jiaoyifu-task-paradigm · 四轴
 【路由·工具调用】插件工具（track/taskline/content/vision/skill_*/scout/publish 等）由父代理代办；执行类工作整包委派子代理。handoff 四件套：目标（一句话可验收）＋上下文（自包含路径与事实）＋验收标准（与 taskline 同源）＋回读自查指令。
 【执行·状态】委派后不抢活；阶段推进用 taskline_advance 记锚点（note 写关键事实：委派了谁、改了什么）。
 【验证·验证机制】子代理交付回来逐条 taskline_verify：pass 必须附证据（文件:行号/命令输出）；fail 必须二次委派修复后重验，不得带病过门。
-【收尾·状态】全部 pass → taskline_advance(phase='close')（close 硬门：验收未全 pass 会被拒绝）→ 按收尾门协议询问「是否进入收尾流程？」。
+【收尾·状态】全部 pass → taskline_advance(phase='close')（close 硬门：验收未全 pass 会被拒绝）→ 按收尾门协议询问「是否进入收尾流程？」。有可讲述的工作成果时，再提示是否收割为内容选题（content_from_task）。
 
 状态存续：任务线落盘 ~/.dsh/taskline.json 并动态注入 systemPrompt；上下文压缩或新会话后，先调 taskline_get 恢复现场再继续。一次一条主线：开新线前必须 close 旧线。`
 

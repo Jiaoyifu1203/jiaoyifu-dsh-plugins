@@ -18,8 +18,10 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { join } from 'node:path'
 import { buildInjectPayload } from './memory.ts'
 import { scheduleQc } from './qc.ts'
+import { formatHarvestReport, harvestToEpisode, listTasksForHarvest } from './harvest.ts'
 import {
   PLATFORM_KEYS,
   PLATFORM_LABELS,
@@ -27,6 +29,7 @@ import {
   STATUS_LABELS,
   contentRoot,
   createEpisode,
+  dshHome,
   ensureRoot,
   findEpisode,
   getEpisode,
@@ -64,6 +67,8 @@ export interface Config {
   publishRpa?: boolean
   /** 覆盖创作后台 URL，键为 xhs/bilibili/douyin/shipinhao/gzh */
   publishUrls?: Partial<Record<PlatformKey, string>>
+  /** 收割 git/CONTEXT 的默认仓库路径 */
+  workRepo?: string
   /** 被动质检（写 script/article 后异步跑，失败静默） */
   qcEnabled?: boolean
   qcProvider?: string
@@ -81,6 +86,7 @@ export const Config: Schema<Config> = Schema.object({
   videoResolution: Schema.string().default('1080x1920'),
   publishRpa: Schema.boolean().default(false),
   publishUrls: Schema.dict(Schema.string()).default({}),
+  workRepo: Schema.string().default(''),
   qcEnabled: Schema.boolean().default(true),
   qcProvider: Schema.string().default('deepseek-official'),
   qcModel: Schema.string().default('deepseek-v4-flash'),
@@ -138,6 +144,9 @@ export function apply(ctx: Context, config: Config): void {
   const root = contentRoot(config.contentRoot ?? '')
   const panelPath = String(config.panelPath || '/jiaoyifu/studio')
   const maxChars = clampNum(config.maxInjectChars, 200, 2000, 600)
+  const workRepo = String(config.workRepo ?? '')
+  const trackPath = join(dshHome(), 'track.json')
+  const tasklinePath = join(dshHome(), 'taskline.json')
   const binds: Record<string, string> = {}
 
   void (async () => {
@@ -200,6 +209,9 @@ export function apply(ctx: Context, config: Config): void {
       if (!ep) return `读取失败：${meta.slug}`
       const lines = [`## ${ep.meta.title}（${ep.meta.slug}）`, '']
       lines.push(`状态：${STATUS_LABELS[ep.meta.status]}｜平台：${platformLine(ep.meta)}`)
+      if (ep.meta.sourceTask && ep.meta.sourceTask.length) {
+        lines.push(`来源任务：${ep.meta.sourceTask.join(', ')}`)
+      }
       lines.push(`目录：${ep.dir}`)
       const fileNote = [
         'topic.md',
@@ -246,6 +258,34 @@ export function apply(ctx: Context, config: Config): void {
         `目录：${root}/${meta.slug}`,
         '下一步：/content ' + meta.slug + ' 绑定本期；写脚本用 content_write；出封面/字幕交给对应技能；状态与发布用 content_status。',
       ].join('\n')
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'content_from_task',
+    description:
+      '收割任务产出为新内容期：从任务账本(track)+任务线(taskline)+git提交+CONTEXT锚点自动生成选题素材包写入 topic.md，并与任务建立来源关联。tasks 支持逗号分隔多任务合并一期，或 latest 取最近任务。',
+    parameters: {
+      tasks: { type: 'string', required: true, description: '任务 ID，逗号分隔；或 latest 取最近一条' },
+      title: { type: 'string', description: '内容标题；缺省用第一个任务标题' },
+      repo: { type: 'string', description: 'git/CONTEXT 仓库路径；缺省用配置 workRepo' },
+    },
+    output: { schema: { type: 'string' }, render: (_args: any, value: any) => [{ type: 'text', text: String(value) }] },
+    async execute(args: any) {
+      const input = String(args?.tasks ?? '').trim()
+      if (!input) return 'tasks 不能为空（ISS-xxx 或 latest）。'
+      const title = typeof args?.title === 'string' ? args.title.trim() : ''
+      const repo = typeof args?.repo === 'string' ? args.repo.trim() : ''
+      try {
+        const result = await harvestToEpisode(root, trackPath, tasklinePath, input, {
+          title: title || undefined,
+          repo: repo || undefined,
+          workRepo,
+        })
+        return formatHarvestReport(root, result)
+      } catch (err) {
+        return `❌ 收割失败：${(err as Error)?.message ?? err}`
+      }
     },
   }))
 
@@ -722,6 +762,7 @@ export function apply(ctx: Context, config: Config): void {
             publishFacts: await publish.episodePublishFacts(root, ep.meta.slug),
             memory: ep.meta.memory ?? [],
             qc: ep.meta.qc ?? null,
+            sourceTask: ep.meta.sourceTask ?? null,
           },
         })
         return
@@ -739,6 +780,32 @@ export function apply(ctx: Context, config: Config): void {
         const filePath = `${dir}/${file}`
         const ext = file.slice(file.lastIndexOf('.'))
         await serveMedia(req, res, filePath, MIME[ext] ?? 'application/octet-stream')
+        return
+      }
+
+      if (method === 'GET' && rest === '/api/tasks') {
+        const items = await listTasksForHarvest(root, trackPath, tasklinePath, 50)
+        sendJson(res, 200, { ok: true, items })
+        return
+      }
+
+      if (method === 'POST' && rest === '/api/from-task') {
+        const body = JSON.parse(await readBody(req))
+        const taskId = String(body?.taskId ?? '').trim()
+        if (!taskId) {
+          sendJson(res, 400, { ok: false, error: '缺少 taskId' })
+          return
+        }
+        const title = typeof body?.title === 'string' ? String(body.title).trim() : ''
+        try {
+          const result = await harvestToEpisode(root, trackPath, tasklinePath, taskId, {
+            title: title || undefined,
+            workRepo,
+          })
+          sendJson(res, 200, { ok: true, slug: result.slug })
+        } catch (err) {
+          sendJson(res, 400, { ok: false, error: String((err as Error)?.message ?? err) })
+        }
         return
       }
 
