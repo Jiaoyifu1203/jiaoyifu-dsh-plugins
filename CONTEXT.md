@@ -27,6 +27,13 @@
 - 知识库：`AI知识体系/03-工具与方法/01-工具图谱/[L1] DeepSeek Harness与Pi速查` 关键事实表补「环境级规则文件 + 命名规范」两行（顺带补上 08-18 三件套缺的规则文件条目），修订/验证日期升 2026-08-18。
 - 背景：jiaoyifu-task-paradigm 由 dsh- 前缀更名而来（commit 743ce6c），自此确立统一命名。
 
+## 2026-08-18 任务交互范式落地：jiaoyifu-task-paradigm 四轴一线插件
+
+- 起因：核查 GBrain 传言后确立方向--记忆/进化已有知识库体系承载，harness 的护城河在「任务交互范式」：推理接口/工具调用/长程状态/验证机制四轴拧成一条线（识别->配置->路由->执行->验证->收尾）。
+- 交付：plugins/jiaoyifu-task-paradigm/（commit 0fb0592 新增、743ce6c 由 dsh- 前缀更名）--protocol 静态段(order 116.7) + taskline beacon 动态段(116.71) + 4 工具（taskline_begin/advance/verify/get）+ close 硬门（验收未全 pass 拒绝关闭）+ 状态落盘 ~/.dsh/taskline.json（上下文压缩后可恢复）。
+- 三账本分工：track=多任务账本（ISS 注册表）、taskline=当前主线执行状态、goal=会话级目标；一个任务 ID 贯穿。
+- 待办：④实测待重启（./scripts/start-web.sh）后用真实任务首单吃狗粮；grok 子代理收尾问句串台问题待重启后验证消失。
+
 ## 2026-08-18 DSH 环境治理三件套：启动器 + 环境级委派约束 + 识别/收尾门同步
 
 - 启动器：根目录 `启动DeepSeekHarness.command`（Finder 双击 -> 自动开终端起服务 -> 轮询 3080 就绪后开浏览器；关窗即停服务）。
