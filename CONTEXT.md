@@ -13,6 +13,14 @@
 
 状态：Pi 已通（/login DeepSeek 后 V4 可选）。dsh 走官方 `npx @deepseek-ai/dsh web`，启动脚本是 `scripts/start-web.sh`。不克隆源码仓。
 
+## 2026-08-19 面板修复升级：滚动根因修复+形式分流动线+e2e 测试基建
+
+- 滚动根因：`.detail` 缺 `min-height:0`/`overflow:hidden`，`#tab-body` 被内容撑开（scrollHeight===clientHeight）却仍是 `overflow:auto` 滚轮接收者，视频/脚本/字幕/文章长 Tab 滚不动；修复后五 Tab `scrollTop>0`。
+- 形式分流：`meta.form=xhs|gzh|video`，`content_status` + `POST /api/status` 双写入；概览①三选一 / ②制作动线复用知识库产线（xiaohongshu-content / article / video-script-forge）。
+- e2e：`scripts/panel-e2e.mjs`（stub 直测 PANEL_HTML + 系统 Chrome，playwright 装 `.tmp-tooling` 不进 git）。
+- 提交哈希：`6517f8c`（origin/main，完整 `6517f8c4e72ed21ea018e5cebc2fafc92ac42f11`）。已推送。
+
+
 ## 2026-08-19 内容工作台升级：工作->内容桥（jiaoyifu-studio 收割器落地）
 
 - 做了什么：jiaoyifu-studio 新增任务收割器，把 track 任务产出自动建成一期内容（topic.md 素材包）。

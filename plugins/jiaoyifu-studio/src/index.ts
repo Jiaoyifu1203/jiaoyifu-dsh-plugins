@@ -23,6 +23,7 @@ import { buildInjectPayload } from './memory.ts'
 import { scheduleQc } from './qc.ts'
 import { formatHarvestReport, harvestToEpisode, listTasksForHarvest } from './harvest.ts'
 import {
+  FORM_LABELS,
   PLATFORM_KEYS,
   PLATFORM_LABELS,
   PUBLISH_LABELS,
@@ -36,6 +37,7 @@ import {
   listEpisodes,
   loadBinds,
   safeItemDir,
+  sanitizeForm,
   saveBinds,
   updateEpisode,
   writeEpisodeFile,
@@ -209,6 +211,7 @@ export function apply(ctx: Context, config: Config): void {
       if (!ep) return `读取失败：${meta.slug}`
       const lines = [`## ${ep.meta.title}（${ep.meta.slug}）`, '']
       lines.push(`状态：${STATUS_LABELS[ep.meta.status]}｜平台：${platformLine(ep.meta)}`)
+      if (ep.meta.form) lines.push(`形式：${FORM_LABELS[ep.meta.form]}`)
       if (ep.meta.sourceTask && ep.meta.sourceTask.length) {
         lines.push(`来源任务：${ep.meta.sourceTask.join(', ')}`)
       }
@@ -336,6 +339,7 @@ export function apply(ctx: Context, config: Config): void {
       comments: { type: 'number', description: '评论数' },
       favorites: { type: 'number', description: '收藏数' },
       url: { type: 'string', description: '作品链接' },
+      form: { type: 'string', description: '内容形式：xhs 小红书贴片 / gzh 公众号长文 / video 视频' },
     },
     output: { schema: { type: 'string' }, render: (_args: any, value: any) => [{ type: 'text', text: String(value) }] },
     async execute(args: any) {
@@ -352,6 +356,7 @@ export function apply(ctx: Context, config: Config): void {
         comments: args?.comments !== undefined ? args.comments : undefined,
         favorites: args?.favorites !== undefined ? args.favorites : undefined,
         url: args?.url !== undefined ? args.url : undefined,
+        form: sanitizeForm(args?.form),
       })
       return `已更新：${formatMeta(next)}`
     },
@@ -763,6 +768,8 @@ export function apply(ctx: Context, config: Config): void {
             memory: ep.meta.memory ?? [],
             qc: ep.meta.qc ?? null,
             sourceTask: ep.meta.sourceTask ?? null,
+            form: ep.meta.form ?? null,
+            publish: ep.meta.publish ?? null,
           },
         })
         return
@@ -837,6 +844,7 @@ export function apply(ctx: Context, config: Config): void {
           comments: body?.comments !== undefined ? Number(body.comments) : undefined,
           favorites: body?.favorites !== undefined ? Number(body.favorites) : undefined,
           url: body?.url !== undefined ? String(body.url) : undefined,
+          form: sanitizeForm(body?.form),
         })
         sendJson(res, 200, { ok: true, meta: next })
         return

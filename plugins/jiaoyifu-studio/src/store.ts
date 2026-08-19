@@ -35,6 +35,21 @@ export type { MemoryEntry, QcInfo }
 export type EpisodeStatus = 'not_started' | 'preparing' | 'ready' | 'published'
 export type PublishStatus = 'unpublished' | 'draft' | 'published'
 export type PlatformKey = 'xhs' | 'bilibili' | 'douyin' | 'shipinhao' | 'gzh'
+export type ContentForm = 'xhs' | 'gzh' | 'video'
+
+export const CONTENT_FORMS: ContentForm[] = ['xhs', 'gzh', 'video']
+
+export const FORM_LABELS: Record<ContentForm, string> = {
+  xhs: '小红书贴片',
+  gzh: '公众号长文',
+  video: '视频',
+}
+
+/** 只认 xhs / gzh / video，其余丢弃。 */
+export function sanitizeForm(raw: unknown): ContentForm | undefined {
+  if (raw === 'xhs' || raw === 'gzh' || raw === 'video') return raw
+  return undefined
+}
 
 export const PLATFORM_LABELS: Record<PlatformKey, string> = {
   xhs: '小红书',
@@ -110,6 +125,8 @@ export interface EpisodeMeta {
   publish?: Partial<Record<PlatformKey, PublishPackInfo>>
   memory?: MemoryEntry[]
   qc?: QcInfo
+  /** 内容形式：小红书贴片 / 公众号长文 / 视频（驱动制作动线） */
+  form?: ContentForm
 }
 
 export interface EpisodeFiles {
@@ -317,6 +334,8 @@ export async function readMeta(root: string, slug: string): Promise<EpisodeMeta 
     if (memory) meta.memory = memory
     const qc = sanitizeQc(raw.qc)
     if (qc) meta.qc = qc
+    const form = sanitizeForm(raw.form)
+    if (form) meta.form = form
     return meta
   } catch {
     return null
@@ -551,6 +570,7 @@ export interface StatusPatch {
   comments?: number
   favorites?: number
   url?: string
+  form?: ContentForm
 }
 
 export async function updateEpisode(root: string, slug: string, patch: StatusPatch): Promise<EpisodeMeta> {
@@ -582,6 +602,10 @@ export async function updateEpisode(root: string, slug: string, patch: StatusPat
       if (!info.url) delete info.url
     }
     meta.platforms[key] = info
+  }
+  if (patch.form !== undefined) {
+    const form = sanitizeForm(patch.form)
+    if (form) meta.form = form
   }
   meta.updatedAt = nowIso()
   await writeFile(join(dir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8')

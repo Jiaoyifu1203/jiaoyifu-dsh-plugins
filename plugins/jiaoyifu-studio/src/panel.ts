@@ -21,7 +21,7 @@ export const PANEL_HTML = `<!doctype html>
   --green:#3fb950; --amber:#d29922; --blue:#58a6ff; --red:#f85149;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
+html,body{height:100%;overflow:hidden}
 body{background:var(--bg);color:var(--text);font:14px/1.6 -apple-system,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',system-ui,sans-serif;display:flex;flex-direction:column}
 a{color:var(--blue);text-decoration:none}
 button{font-family:inherit}
@@ -38,7 +38,7 @@ button{font-family:inherit}
 .btn.small{padding:3px 9px;font-size:12px}
 .btn:disabled{opacity:.5;cursor:default}
 
-.main{flex:1;display:flex;min-height:0}
+.main{flex:1;display:flex;min-height:0;overflow:hidden}
 .side{width:300px;flex-shrink:0;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--panel);min-height:0}
 .side-tools{padding:10px;display:flex;gap:8px;border-bottom:1px solid var(--border)}
 .search{flex:1;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;color:var(--text);font-size:13px;outline:none}
@@ -54,7 +54,7 @@ button{font-family:inherit}
 .item-meta{font-size:11px;color:var(--muted);margin-top:2px;display:flex;gap:6px;align-items:center}
 .side-foot{padding:8px 12px;border-top:1px solid var(--border);color:var(--muted);font-size:11px}
 
-.detail{flex:1;min-width:0;display:flex;flex-direction:column}
+.detail{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .dhead{padding:18px 22px 0;flex-shrink:0}
 .dtitle-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .dtitle{font-size:19px;font-weight:700}
@@ -144,9 +144,19 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
 .pill.harvested{background:rgba(110,118,129,.15);color:#9aa3ad;border:1px solid rgba(110,118,129,.4)}
 
 .hint{font-size:12.5px;color:var(--muted);background:rgba(77,107,254,.08);border:1px solid rgba(77,107,254,.3);border-radius:8px;padding:8px 12px;margin-bottom:14px}
+.form-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.form-opt{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:14px 12px;white-space:normal;text-align:left;height:100%;line-height:1.4}
+.form-opt .form-desc{display:block;font-size:11px;color:var(--muted);font-weight:400}
+.form-badge-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.flow-chain{font-size:11.5px;color:var(--muted);margin:4px 0 12px;line-height:1.5}
+.flow-todo{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;padding:8px 0;border-top:1px solid var(--border)}
+.flow-todo .todo-name{font-size:13px;font-weight:550}
+.flow-todo .todo-hint{font-size:11px;color:var(--muted)}
 @media (max-width:900px){
   .main{flex-direction:column}
   .side{width:100%;max-height:38vh;border-right:none;border-bottom:1px solid var(--border)}
+  .detail{min-height:0}
+  .form-grid{grid-template-columns:1fr}
   .slogan{display:none}
 }
 </style>
@@ -399,6 +409,7 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
 
   // ---------- 详情 ----------
   function openItem(slug, keepTab) {
+    if (!current || current.slug !== slug) changingForm = false;
     fetchJson(PANEL_BASE + '/api/item?slug=' + encodeURIComponent(slug)).then(function (data) {
       if (!data || !data.ok) { toast('找不到该期内容'); return }
       current = data.item;
@@ -410,6 +421,8 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
   var currentTab = 'overview';
   var busy = null;
   var videoProbe = null;
+  var changingForm = false;
+  var FORM_LABELS = { xhs: '小红书贴片', gzh: '公众号长文', video: '视频' };
   function switchTab(name) {
     currentTab = name;
     var tabs = document.querySelectorAll('.tab');
@@ -467,10 +480,158 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     return html + '</select>';
   }
 
+  function itemForm(item) {
+    var f = item && item.form;
+    if (f === 'xhs' || f === 'gzh' || f === 'video') return f;
+    return '';
+  }
+  function hasText(s) { return !!String(s || '').trim(); }
+  function hasPack(item, key) {
+    if (item.publish && item.publish[key]) return true;
+    var f = item.publishFacts && item.publishFacts[key];
+    return !!(f && f.exists);
+  }
+  function hasAnyPack(item) {
+    if (item.publish) {
+      var ks = Object.keys(item.publish);
+      for (var i = 0; i < ks.length; i++) if (item.publish[ks[i]]) return true;
+    }
+    var facts = item.publishFacts || {};
+    var keys = ['xhs', 'bilibili', 'douyin', 'shipinhao', 'gzh'];
+    for (var j = 0; j < keys.length; j++) if (facts[keys[j]] && facts[keys[j]].exists) return true;
+    return false;
+  }
+  function voiceCount(item) {
+    if (item.video && item.video.sentences > 0) return item.video.sentences;
+    if (item.videoFacts && item.videoFacts.voiceCount > 0) return item.videoFacts.voiceCount;
+    return 0;
+  }
+  function hasBoard(item) {
+    if (item.videoFacts && item.videoFacts.storyboard) return true;
+    if (item.files && hasText(item.files.storyboard)) return true;
+    if (item.video && item.video.storyboard) return true;
+    return false;
+  }
+  function formPickerHtml(item) {
+    var form = itemForm(item);
+    var html = '<div class="card" id="form-card">';
+    if (form && !changingForm) {
+      html += '<h3>① 内容形式</h3>';
+      html += '<div class="form-badge-row">';
+      html += '<span class="pill st-ready" id="form-badge">形式：' + esc(FORM_LABELS[form]) + '</span>';
+      html += '<a href="javascript:void(0)" data-act="change-form" id="form-change">换形式</a>';
+      html += '</div></div>';
+      return html;
+    }
+    html += '<h3>① 选择内容形式</h3>';
+    html += '<div class="form-grid">';
+    html += '<button class="btn form-opt" data-act="set-form" data-form="xhs">📕 小红书贴片<span class="form-desc">文案+卡片图，jiaoyifu-xiaohongshu-content 产线</span></button>';
+    html += '<button class="btn form-opt" data-act="set-form" data-form="gzh">📝 公众号长文<span class="form-desc">article.md，jiaoyifu-article 产线</span></button>';
+    html += '<button class="btn form-opt" data-act="set-form" data-form="video">🎬 视频<span class="form-desc">口播脚本-&gt;配音-&gt;合成，jiaoyifu-video-script-forge + 本地产线</span></button>';
+    html += '</div></div>';
+    return html;
+  }
+  function pipelineStages(item, form) {
+    var topic = hasText(item.files && item.files.topic);
+    if (form === 'xhs') {
+      var copyReady = hasText(item.files && item.files.script) || hasText(item.files && item.files.article);
+      return [
+        { key: 'topic', name: '定选题', done: topic },
+        { key: 'copy', name: copyReady ? '文案已产出' : '产线链', done: copyReady },
+        { key: 'cover', name: '封面/卡片', done: !!item.hasCover },
+        { key: 'pack', name: '发布包', done: hasPack(item, 'xhs') }
+      ];
+    }
+    if (form === 'gzh') {
+      var art = String((item.files && item.files.article) || '').trim();
+      return [
+        { key: 'topic', name: '定选题', done: topic },
+        { key: 'article', name: '长文', done: art.length > 200 },
+        { key: 'cover', name: '配图', done: !!item.hasCover },
+        { key: 'pack', name: '发布包', done: hasPack(item, 'gzh') }
+      ];
+    }
+    return [
+      { key: 'topic', name: '定选题', done: topic },
+      { key: 'script', name: '脚本', done: hasText(item.files && item.files.script) },
+      { key: 'voice', name: '配音', done: voiceCount(item) > 0 },
+      { key: 'subs', name: '字幕', done: hasText(item.files && item.files.subs) },
+      { key: 'storyboard', name: '分镜', done: hasBoard(item) },
+      { key: 'compose', name: '合成', done: !!item.hasVideo },
+      { key: 'pack', name: '发布包', done: hasAnyPack(item) }
+    ];
+  }
+  function chainNote(form) {
+    if (form === 'xhs') return '全链：asking(1A)-&gt;7层角色链(L0库检索-&gt;L1身份-&gt;L2情绪+标题-&gt;L3钩子-&gt;L4封面-&gt;L5叙事-&gt;L6声音-&gt;L7总审)-&gt;asking(M2)-&gt;jiaoyifu-xiaohongshu-content 执行序列（文案-&gt;封面图-&gt;卡片合成-&gt;正文卡-&gt;校对）';
+    if (form === 'gzh') return '全链：asking(1A)-&gt;6角色链(MrBeast/塔勒布/罗永浩/呼兰/马伯庸/原研哉)+DNA卡-&gt;asking(M2)-&gt;jiaoyifu-article 生产 article.md-&gt;配图-&gt;发布';
+    return '全链：jiaoyifu-video-script-forge 写 script.md-&gt;面板视频产线(配音-&gt;字幕-&gt;分镜-&gt;合成)-&gt;publish_pack 发布包';
+  }
+  function flowCmd(slug, form, key) {
+    var head = '/content ' + slug;
+    var line = '';
+    if (key === 'topic') line = '帮我定这一期选题并写进 topic.md';
+    else if (key === 'copy') line = '按 jiaoyifu-xiaohongshu-content 产线做这一期：先 asking(1A) 挖我的主观理解，再走 7 层角色链';
+    else if (key === 'article') line = '按 jiaoyifu-article 产线把这一期写成公众号长文（先 asking(1A)，走 6 角色链出 DNA 卡，M2 校准后写 article.md）';
+    else if (key === 'script') line = '按 jiaoyifu-video-script-forge 范式给这一期写口播脚本到 script.md';
+    else if (key === 'cover' && form === 'xhs') line = '按 jiaoyifu-xiaohongshu-content 产线补这一期封面图和卡片合成，写进本期 cover.*';
+    else if (key === 'cover' && form === 'gzh') line = '按 jiaoyifu-article 产线给这一期配图，写进本期 cover.*';
+    else if (key === 'pack') line = '按 publish_pack 给这一期生成发布包（只出草稿，不点发布）';
+    else return '';
+    return head + '\\n' + line;
+  }
+  function pendingActionsHtml(item, form, stages) {
+    var html = '';
+    for (var i = 0; i < stages.length; i++) {
+      var s = stages[i];
+      if (s.done) continue;
+      html += '<div class="flow-todo" data-todo="' + s.key + '">';
+      html += '<span class="todo-name">待做 · ' + esc(s.name) + '</span>';
+      if (s.key === 'voice' || s.key === 'subs' || s.key === 'storyboard' || s.key === 'compose') {
+        html += '<button class="btn small" data-act="tab" data-tab="video">去视频 Tab</button>';
+        html += '<span class="todo-hint">面板内完成配音/字幕/分镜/合成</span>';
+      } else if (s.key === 'pack') {
+        html += '<span class="todo-hint">用概览下方「生成发布包」按钮；只出草稿，不点发布</span>';
+        var cmdP = flowCmd(item.slug, form, 'pack');
+        if (cmdP) {
+          html += '<button class="btn small" data-act="copy-flow" data-copy="' + esc(cmdP) + '">复制 DSH 指令</button>';
+          html += '<span class="todo-hint">粘贴到 DSH 会话即开干</span>';
+        }
+      } else {
+        var cmd = flowCmd(item.slug, form, s.key);
+        if (cmd) {
+          html += '<button class="btn small primary" data-act="copy-flow" data-copy="' + esc(cmd) + '">复制 DSH 指令</button>';
+          html += '<span class="todo-hint">粘贴到 DSH 会话即开干</span>';
+        }
+      }
+      html += '</div>';
+    }
+    return html;
+  }
+  function pipelineHtml(item) {
+    var form = itemForm(item);
+    if (!form) return '';
+    var stages = pipelineStages(item, form);
+    var html = '<div class="card" id="flow-card">';
+    html += '<h3>② 制作动线</h3>';
+    html += '<div class="vstages">';
+    for (var i = 0; i < stages.length; i++) {
+      var s = stages[i];
+      html += '<div class="vstage' + (s.done ? ' done' : '') + '" data-stage="' + s.key + '"><span class="dot"></span>' + esc(s.name) + '</div>';
+      if (i < stages.length - 1) html += '<div class="varrow">→</div>';
+    }
+    html += '</div>';
+    html += '<div class="flow-chain">' + chainNote(form) + '</div>';
+    html += pendingActionsHtml(item, form, stages);
+    html += '</div>';
+    return html;
+  }
+
   function overviewHtml(item) {
     var topic = (item.files.topic || '').trim();
     var html = '';
     html += '<div class="hint">围绕本期的写/改交给 DSH 对话：点「在 DSH 里绑定本期」后把命令粘进会话，模型会自动带上本期选题、脚本与平台状态。</div>';
+    html += formPickerHtml(item);
+    html += pipelineHtml(item);
 
     html += '<div class="card"><h3>📌 选题 <span class="file">topic.md</span></h3>';
     if (topic) html += '<div class="topic-text">' + esc(topic) + '</div>';
@@ -671,6 +832,23 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     else if (act === 'close-from-task') closeFromTaskModal();
     else if (act === 'from-task-modal') { /* 点弹窗本体不关闭 */ }
     else if (act === 'harvest-task') harvestTask(elNode.getAttribute('data-id'));
+    else if (act === 'change-form') {
+      changingForm = true;
+      renderDetail(currentTab);
+    }
+    else if (act === 'set-form') {
+      if (!current) return;
+      var nextForm = elNode.getAttribute('data-form');
+      if (nextForm !== 'xhs' && nextForm !== 'gzh' && nextForm !== 'video') return;
+      changingForm = false;
+      postJson(PANEL_BASE + '/api/status', { slug: current.slug, form: nextForm }).then(function (d) {
+        if (d && d.ok) { toast('已选择' + (FORM_LABELS[nextForm] || nextForm)); refreshAll() }
+        else toast((d && d.error) || '保存形式失败');
+      }).catch(function () { toast('保存形式失败') });
+    }
+    else if (act === 'copy-flow') {
+      copyText(elNode.getAttribute('data-copy') || '', '已复制，粘贴到 DSH 会话即开干');
+    }
     else if (act === 'copy-command') { if (current) copyText('/content ' + current.slug, '已复制：/content ' + current.slug) }
     else if (act === 'copy-path') { if (current) copyText(current.dir, '已复制目录路径') }
     else if (act === 'start-prep') {
@@ -816,7 +994,11 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
   document.addEventListener('click', function (e) {
     var t = e.target;
     while (t && t !== document) {
-      if (t.getAttribute && t.getAttribute('data-act')) { handleAct(t.getAttribute('data-act'), t); return }
+      if (t.getAttribute && t.getAttribute('data-act')) {
+        e.preventDefault();
+        handleAct(t.getAttribute('data-act'), t);
+        return;
+      }
       t = t.parentNode;
     }
   });

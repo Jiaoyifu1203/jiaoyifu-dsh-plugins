@@ -64,10 +64,12 @@
 ```
 
 - **面板**：浏览器打开 http://127.0.0.1:3080/jiaoyifu/studio
+- **内容形式与制作动线**（概览第一卡）：未设形式时三选一（📕 小红书贴片 / 📝 公众号长文 / 🎬 视频），落盘 `meta.form`。选定后出「② 制作动线」阶段条，待做步骤可「去视频 Tab」或一键复制两行 DSH 指令（`/content <slug>` + 点名既有产线 skill）。产线不重造：xhs → `jiaoyifu-xiaohongshu-content`；gzh → `jiaoyifu-article`；video → `jiaoyifu-video-script-forge` + 本地面板产线。
 - **对话**：
   - 「帮我新建一期《标题》」→ 模型调 `content_new`
   - `/content <slug>` → 绑定本期为会话上下文（后续自动注入）
   - `/studio` → 面板地址
+  - `content_status` 可写 `form=xhs|gzh|video`
 - **工具**（模型可自主调用）：
   - 内容：`content_list` / `content_get` / `content_new` / `content_write` / `content_status` / `content_bind` / `content_unbind`
   - 视频产线：`video_probe` / `video_voice` / `video_subs` / `video_compose`
@@ -84,3 +86,12 @@
 - 面板路由经 `ctx.webServer.register`（host 服务，web profile 必有）；若服务缺失，插件自动降级为「仅工具模式」。
 - 升级自：Oil Creator 工作台演示（作者未开源，按口播/字幕/画面复原数据流，未抄代码）；
   视频产线升级自 [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTurbo)（MIT）的流水线概念，未复用其代码（moviepy/Pexels/云 TTS 全部替换为本机方案）。
+
+## 面板 e2e（不依赖 DSH）
+
+```bash
+npm i --prefix .tmp-tooling playwright   # 已 gitignore，只解析包，用系统 Chrome
+node scripts/panel-e2e.mjs
+```
+
+esbuild 打包 `panel.ts` → 本地 stub（`/jiaoyifu/studio`）直测 `PANEL_HTML`。覆盖：五 Tab 滚动、形式选择落盘、三条动线状态、⚡从任务弹窗、左侧列表滚动。
