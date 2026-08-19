@@ -137,3 +137,11 @@
         defaultModel: ""
         # 委派中每 30s 更新 Web 待办条，不进对话、不会打断
         heartbeatMs: 30000
+    # 任务交互主线：推理接口 / 工具调用 / 长程状态 / 验证机制四轴一线
+    # 状态落盘 ~/.dsh/taskline.json；close 硬门要求验收全部 pass
+    - id: dsh-task-paradigm
+      name: "/Users/gerryyin/本地/我的积淀/claude桌面版/deepseek-harness/plugins/dsh-task-paradigm/src/index.ts"
+      config:
+        injectProtocol: true
+        injectBeacon: true
+        statePath: "~/.dsh/taskline.json"

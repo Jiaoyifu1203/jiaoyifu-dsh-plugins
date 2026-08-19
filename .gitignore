@@ -5,3 +5,4 @@ npm-debug.log*
 
 .tmp-tooling/
 plugins/feishu.env
+x_search_AYi_*

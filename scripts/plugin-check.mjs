@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 自研插件体检：jiaoyifu-* + dsh-model-agent。社区 npm 包跳过。
+ * 自研插件体检：jiaoyifu-* + dsh-*（本仓 TS 插件目录）。社区 npm 包跳过。
  * 零依赖，node >= 20。
  */
 import { spawnSync } from 'node:child_process'
@@ -16,7 +16,7 @@ const CORDIS = join(PLUGINS, 'cordis.yml')
 const ROOT_PKG = join(REPO, 'package.json')
 const DSH_HOME = process.env.DSH_HOME || join(homedir(), '.dsh')
 
-const FIRST_PARTY = (name) => name.startsWith('jiaoyifu-') || name === 'dsh-model-agent'
+const FIRST_PARTY = (name) => name.startsWith('jiaoyifu-') || name.startsWith('dsh-')
 const NODE_BUILTINS = new Set([
   ...builtinModules,
   ...builtinModules.map((m) => `node:${m}`),

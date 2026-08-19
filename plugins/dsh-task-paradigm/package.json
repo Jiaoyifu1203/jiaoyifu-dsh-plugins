@@ -1,0 +1,8 @@
+{
+  "name": "dsh-task-paradigm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "description": "DSH 任务交互主线：推理接口 / 工具调用 / 长程状态 / 验证机制四轴一线。源码经 plugins/cordis.yml 以绝对路径注册，由 DSH loader 直接打包 TS。"
+}
