@@ -1,5 +1,5 @@
 /**
- * dsh-task-paradigm · 任务交互主线（四轴一线）
+ * jiaoyifu-task-paradigm · 任务交互主线（四轴一线）
  *
  * 把推理接口 / 工具调用 / 长程状态 / 验证机制拧在一条线上：
  * 识别 → 配置 → 路由 → 执行 → 验证 → 收尾。一次一条主线。
@@ -12,7 +12,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname } from 'node:path'
 
-export const name = 'dsh-task-paradigm'
+export const name = 'jiaoyifu-task-paradigm'
 export const inject = ['tools', 'systemPrompt']
 
 export interface Config {
@@ -30,7 +30,7 @@ export const Config: Schema<Config> = Schema.object({
   statePath: Schema.string().default('~/.dsh/taskline.json'),
 })
 
-const PROTOCOL_TEXT = `DSH 任务交互主线（dsh-task-paradigm · 四轴一线）
+const PROTOCOL_TEXT = `DSH 任务交互主线（jiaoyifu-task-paradigm · 四轴一线）
 
 执行类任务一律走主线：识别 → 配置 → 路由 → 执行 → 验证 → 收尾。四轴拧在一条线上，模型可换、范式不变：
 
@@ -141,7 +141,7 @@ export function apply(ctx: Context, config: Config): void {
       mkdirSync(dirname(statePath), { recursive: true })
       writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8')
     } catch (err) {
-      console.error('[dsh-task-paradigm] 保存任务线失败:', err)
+      console.error('[jiaoyifu-task-paradigm] 保存任务线失败:', err)
     }
   }
 
@@ -207,7 +207,7 @@ export function apply(ctx: Context, config: Config): void {
 
   if (config.injectProtocol !== false) {
     ctx.systemPrompt.section({
-      name: 'dsh-task-paradigm-protocol',
+      name: 'jiaoyifu-task-paradigm-protocol',
       order: 116.7,
       text: PROTOCOL_TEXT,
     })
@@ -215,7 +215,7 @@ export function apply(ctx: Context, config: Config): void {
 
   if (config.injectBeacon !== false) {
     ctx.systemPrompt.section({
-      name: 'dsh-task-paradigm-state',
+      name: 'jiaoyifu-task-paradigm-state',
       order: 116.71,
       text: () => renderBeacon(),
     })
@@ -368,8 +368,8 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.on('dispose', () => {
     saveNow()
-    console.log('[dsh-task-paradigm] 已卸载（任务线已落盘）')
+    console.log('[jiaoyifu-task-paradigm] 已卸载（任务线已落盘）')
   })
 
-  console.log(`[dsh-task-paradigm] 已挂载 taskline_*（状态：${statePath}）`)
+  console.log(`[jiaoyifu-task-paradigm] 已挂载 taskline_*（状态：${statePath}）`)
 }

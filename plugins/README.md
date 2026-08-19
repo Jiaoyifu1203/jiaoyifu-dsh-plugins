@@ -2,7 +2,7 @@
 
 为 DeepSeek Harness 定制升级的精简插件集 —— 每个插件都基于开源生态里已验证的方案
 **升级开发**而来，默认零外部依赖、零 UI 构建、密钥只走环境变量。
-自用插件统一 `jiaoyifu-` 命名；对外分享的独立插件用 `dsh-` 前缀（`dsh-model-agent`、`dsh-task-paradigm`）。
+自用插件统一 `jiaoyifu-` 命名；对外分享的独立插件用 `dsh-` 前缀（`dsh-model-agent`、`jiaoyifu-task-paradigm`）。
 
 ## 组成（9 个 TS 插件 + 1 个 grok ACP 桥 + 2 个技能）
 
@@ -16,11 +16,11 @@
 | `jiaoyifu-feishu` | dsh-feishu-notify / OpenClaw 飞书通道 | **飞书机器人 → DSH 桥**：私聊消息转发给本机 DSH agent（同模型/技能/插件/工具），回复回传飞书；每用户独立会话、落盘 resume、/reset 重置；长连接模式无需公网；Secret 只走 FEISHU_APP_SECRET 环境变量 |
 | `jiaoyifu-studio` | Oil Creator 内容工作台笔记 + MoneyPrinterTurbo 流水线（MIT） | **自媒体内容工作台 + 视频生产流水线（v1.2）**：内容库目录规范 + `content_*` 七工具 + `/content` 绑定 + 同源面板 `/jiaoyifu/studio`；**better-sidebar Tab**「内容工作台」+ `subs.srt` 预览器（client 半，`src/client.js`）；发布适配器 `publish_pack` / `publish_draft`（**铁律只填草稿**，不点发布）；分镜阶段 `video_storyboard` → `composeMode=storyboard`；三层记忆注入（45/35/20）；被动质检 `qc`（写 script/article 后异步、失败静默）；`llm-fallback` 容错；视频产线 `video_probe/voice/subs/storyboard/compose`（macOS `say` + `afinfo` + `ffmpeg`，零 API） |
 | `dsh-model-agent` | 自研（dsh-tool-subagent 的 toolName 思路 + ACP 桥） | **模型可切换全权委派**：`model_agent` 工具整包委派任务，执行模型三档（grok 登录账户 ACP / deepseek-v4-flash / deepseek-v4-pro，后两档拥有 harness 全部工具）；首次选定落盘 `~/.dsh/model-agent.json` 沿用、每次委派报模型、对话可换（`model_agent_config`）；配套 `grok-acp-provider`（官方 `dsh-subagent-acp` 包）把 grok CLI 登录账户注册为子代理提供方，无需 API key |
-| `dsh-task-paradigm` | 自研 | **任务交互主线**：推理接口 / 工具调用 / 长程状态 / 验证机制四轴一线；`taskline_*` 开线/推进/验收/读线，close 硬门，状态落盘 `~/.dsh/taskline.json` 并注入 beacon |
+| `jiaoyifu-task-paradigm` | 自研 | **任务交互主线**：推理接口 / 工具调用 / 长程状态 / 验证机制四轴一线；`taskline_*` 开线/推进/验收/读线，close 硬门，状态落盘 `~/.dsh/taskline.json` 并注入 beacon |
 | `jiaoyifu-ui-design`（SKILL） | frontend-design / ui-ux-pro-max / huashu-design | **UI 设计工作台**：风格库 → HTML 高保真 → 10 条美感门禁 |
 | `dsh-model-agent-delegation`（SKILL） | 自研 | **委派组合分工协议**：grok 子代理负责读文件/跑命令/调研/实现，DSH 插件工具环节由父代理代办；模型选定/沿用/切换的完整操作路径 |
 
-## dsh-task-paradigm（任务交互主线）
+## jiaoyifu-task-paradigm（任务交互主线）
 
 任务交互主线：推理接口 / 工具调用 / 长程状态 / 验证机制四轴一线。一次一条主线，状态落盘 `~/.dsh/taskline.json`，协议段 + beacon 注入 systemPrompt。
 
@@ -35,7 +35,7 @@
 
 - `jiaoyifu-track`：多任务账本（ISS 生命周期、决策、念头墙），可并行多条，不负责「当前这一条主线」的阶段与验收硬门。
 - `goal`（会话级目标）：本轮对话想达成什么，随会话走，不落跨会话任务线，也不验逐条断言。
-- `dsh-task-paradigm`：当前唯一执行主线（识别 → 配置 → 路由 → 执行 → 验证 → 收尾），与 track 的 ISS id 对齐，压缩/新会话后用 `taskline_get` 恢复。
+- `jiaoyifu-task-paradigm`：当前唯一执行主线（识别 → 配置 → 路由 → 执行 → 验证 → 收尾），与 track 的 ISS id 对齐，压缩/新会话后用 `taskline_get` 恢复。
 
 ## 安装（本机，共 4 步）
 
@@ -119,7 +119,7 @@ plugins/
     src/{index,store,panel,video,publish,memory,qc,llm-fallback}.ts
     src/client.js             # better-sidebar Tab + srt 预览器（client 半）
   dsh-model-agent/            # 模型可切换全权委派
-  dsh-task-paradigm/          # 任务交互主线（四轴一线 + taskline_*）
+  jiaoyifu-task-paradigm/          # 任务交互主线（四轴一线 + taskline_*）
 skills/
   jiaoyifu-ui-design/         # UI 设计工作台（SKILL.md）
 scripts/
