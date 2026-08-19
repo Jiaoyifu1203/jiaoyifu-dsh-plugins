@@ -58,4 +58,7 @@ for (const name of ["dsh-better-sidebar", "widget-dock", "dsh-video-preview", "j
 }
 '
 
+echo "==> patch widget-dock adaptive deck"
+node "$ROOT/scripts/patch-widget-dock.mjs"
+
 echo "==> done"

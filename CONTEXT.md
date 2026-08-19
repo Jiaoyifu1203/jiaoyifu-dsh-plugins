@@ -13,6 +13,13 @@
 
 状态：Pi 已通（/login DeepSeek 后 V4 可选）。dsh 走官方 `npx @deepseek-ai/dsh web`，启动脚本是 `scripts/start-web.sh`。不克隆源码仓。
 
+## 2026-08-19 widget-dock 自适应补丁（社区插件本地定制首例）
+
+- 动因：widget-dock 卡片显示门槛 180px 空白，窄窗口全收起只剩右缘小竖条（用户实测「必须全屏才能看到」），要求自适应。
+- 改动：`node_modules/widget-dock/lib/client.js` bundle 直改：门槛 `DECK_MIN_VISIBLE=120`、空白<`DECK_COMPACT(220)` 紧凑单列流式、安全边距 26/8px 条件收窄；宽窗口多列/拖拽/尺寸档零回归。
+- 耐久化（node_modules 不进 git）：`scripts/patch-widget-dock.mjs` 幂等重放（标记 `jiaoyifu-patch: adaptive-deck v1`，精确字符串匹配，任一失败不写半补丁）+ `install-community-plugins.sh` 末尾自动跑 + `plugins/README.md` 说明；原版备份 `.tmp-tooling/widget-dock-client.orig.js`。
+- 要点：DSH serveBundle 按请求读盘 + no-cache -> 改插件 bundle 不用重启 3080，浏览器硬刷新即生效。
+
 ## 2026-08-18 DSH 环境治理三件套：启动器 + 环境级委派约束 + 识别/收尾门同步
 
 - 启动器：根目录 `启动DeepSeekHarness.command`（Finder 双击 -> 自动开终端起服务 -> 轮询 3080 就绪后开浏览器；关窗即停服务）。

@@ -54,6 +54,8 @@ bash scripts/install-community-plugins.sh
 
 **安装**：`bash scripts/install-community-plugins.sh`（内部 `npm install --cache .tmp-tooling/npm-cache` + profile symlink）。也可只跑 `npm install --cache .tmp-tooling/npm-cache`，再靠 `start-web.sh` 启动前幂等 heal symlink。
 
+**widget-dock 本地补丁**：`adaptive-deck v1`（可见门槛 180→120、窄空白紧凑单列、安全边距自适应）。npm 重装会覆盖 `node_modules` 手改；`install-community-plugins.sh` 末尾自动重放。手工重放：`node scripts/patch-widget-dock.mjs`（已打补丁则输出 `already patched` 并退出 0）。
+
 **禁止** `dsh plugin add`：三包都带 `dsh.bundle.patch`，官方 add 会再 insert 一次 → 双挂载。
 
 **studio Tab 用法**：重启后打开 Web UI → 侧边栏 `+` → 「内容工作台」（iframe `/jiaoyifu/studio`）。直链 `http://127.0.0.1:3080/jiaoyifu/studio` 仍可用（host 半不依赖 sidebar）。
@@ -103,7 +105,8 @@ skills/
 scripts/
   link-skills.sh              # 技能链接同步
   start-web.sh                # 启动（自动 --patch + 社区包 symlink heal）
-  install-community-plugins.sh # npm 装 3 社区包 + profile node_modules symlink
+  install-community-plugins.sh # npm 装 3 社区包 + profile node_modules symlink + widget-dock 补丁重放
+  patch-widget-dock.mjs       # widget-dock adaptive-deck 幂等补丁（防 npm 重装丢失）
   plugin-check.mjs            # 自研插件体检（npm run check:plugins）
 ```
 
