@@ -20,6 +20,13 @@
 - 耐久化（node_modules 不进 git）：`scripts/patch-widget-dock.mjs` 幂等重放（标记 `jiaoyifu-patch: adaptive-deck v1`，精确字符串匹配，任一失败不写半补丁）+ `install-community-plugins.sh` 末尾自动跑 + `plugins/README.md` 说明；原版备份 `.tmp-tooling/widget-dock-client.orig.js`。
 - 要点：DSH serveBundle 按请求读盘 + no-cache -> 改插件 bundle 不用重启 3080，浏览器硬刷新即生效。
 
+## 2026-08-18 命名规范统一：jiaoyifu-xxx（规则落盘 + 设施强制 + 知识库同步）
+
+- 规则权威落点：`~/.dsh/AGENTS.md` §4（环境级，所有会话自动加载）；工作区 AGENTS.md 投影同步。
+- 设施强制：`scripts/plugin-check.mjs` 新增 f.naming 检查--新插件目录必须 ^jiaoyifu-，存量 dsh-model-agent 白名单。
+- 知识库：`AI知识体系/03-工具与方法/01-工具图谱/[L1] DeepSeek Harness与Pi速查` 关键事实表补「环境级规则文件 + 命名规范」两行（顺带补上 08-18 三件套缺的规则文件条目），修订/验证日期升 2026-08-18。
+- 背景：jiaoyifu-task-paradigm 由 dsh- 前缀更名而来（commit 743ce6c），自此确立统一命名。
+
 ## 2026-08-18 DSH 环境治理三件套：启动器 + 环境级委派约束 + 识别/收尾门同步
 
 - 启动器：根目录 `启动DeepSeekHarness.command`（Finder 双击 -> 自动开终端起服务 -> 轮询 3080 就绪后开浏览器；关窗即停服务）。

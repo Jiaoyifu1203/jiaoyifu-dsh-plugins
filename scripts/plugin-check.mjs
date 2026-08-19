@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
  * 自研插件体检：jiaoyifu-* + dsh-*（本仓 TS 插件目录）。社区 npm 包跳过。
+ * 检查：a.cordis-entry / b.bare-import / c.relative-.ts / d.schema-required / f.naming / e.esbuild。
  * 零依赖，node >= 20。
  */
 import { spawnSync } from 'node:child_process'
@@ -17,6 +18,8 @@ const ROOT_PKG = join(REPO, 'package.json')
 const DSH_HOME = process.env.DSH_HOME || join(homedir(), '.dsh')
 
 const FIRST_PARTY = (name) => name.startsWith('jiaoyifu-') || name.startsWith('dsh-')
+const NAMING_RE = /^jiaoyifu-[a-z0-9]+(-[a-z0-9]+)*$/
+const NAMING_LEGACY = new Set(['dsh-model-agent'])
 const NODE_BUILTINS = new Set([
   ...builtinModules,
   ...builtinModules.map((m) => `node:${m}`),
@@ -172,6 +175,14 @@ for (const plugin of firstParty) {
   add(plugin, 'b.bare-import', bareBad.length === 0, failDetail(bareBad))
   add(plugin, 'c.relative-.ts', relBad.length === 0, failDetail(relBad))
   add(plugin, 'd.schema-required', reqFalse.length === 0, reqFalse.length ? `required: false @ ${failDetail(reqFalse)}` : '')
+
+  if (NAMING_RE.test(plugin)) {
+    add(plugin, 'f.naming', true)
+  } else if (NAMING_LEGACY.has(plugin)) {
+    add(plugin, 'f.naming', true, 'legacy')
+  } else {
+    add(plugin, 'f.naming', false, '目录名须 jiaoyifu-xxx（kebab-case）')
+  }
 
   if (!existsSync(entry)) {
     add(plugin, 'e.esbuild', false, `缺少入口 ${entry}`)
