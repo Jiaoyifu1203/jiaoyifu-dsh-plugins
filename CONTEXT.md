@@ -19,6 +19,7 @@
 - 形式分流：`meta.form=xhs|gzh|video`，`content_status` + `POST /api/status` 双写入；概览①三选一 / ②制作动线复用知识库产线（xiaohongshu-content / article / video-script-forge）。
 - e2e：`scripts/panel-e2e.mjs`（stub 直测 PANEL_HTML + 系统 Chrome，playwright 装 `.tmp-tooling` 不进 git）。
 - 提交哈希：`6517f8c`（origin/main，完整 `6517f8c4e72ed21ea018e5cebc2fafc92ac42f11`）。已推送。
+- 复修：窄视口滚动饥饿（侧栏抽屉/比例压缩）+ 选形式即开工联动（set-form 联动 preparing）
 
 
 ## 2026-08-19 内容工作台升级：工作->内容桥（jiaoyifu-studio 收割器落地）

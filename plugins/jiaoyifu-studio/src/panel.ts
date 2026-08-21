@@ -134,7 +134,7 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--accent);padding:8px 18px;border-radius:999px;opacity:0;transition:opacity .25s;pointer-events:none;font-size:13px;z-index:99}
 .toast.show{opacity:1}
 
-.mask{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50;display:flex;align-items:center;justify-content:center;padding:24px}
+.mask{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:80;display:flex;align-items:center;justify-content:center;padding:24px}
 .modal{background:var(--card);border:1px solid var(--border);border-radius:14px;width:min(720px,100%);max-height:80vh;display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,.4)}
 .modal-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border);font-weight:650}
 .modal-body{overflow-y:auto;padding:10px 12px}
@@ -148,16 +148,34 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
 .form-opt{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:14px 12px;white-space:normal;text-align:left;height:100%;line-height:1.4}
 .form-opt .form-desc{display:block;font-size:11px;color:var(--muted);font-weight:400}
 .form-badge-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.form-pick-note{font-size:12.5px;color:var(--muted);margin:0 0 10px;line-height:1.5}
+.form-prep-hint{color:var(--amber)}
 .flow-chain{font-size:11.5px;color:var(--muted);margin:4px 0 12px;line-height:1.5}
 .flow-todo{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;padding:8px 0;border-top:1px solid var(--border)}
 .flow-todo .todo-name{font-size:13px;font-weight:550}
 .flow-todo .todo-hint{font-size:11px;color:var(--muted)}
+.side-toggle{display:none}
+.side-mask{display:none}
 @media (max-width:900px){
   .main{flex-direction:column}
-  .side{width:100%;max-height:38vh;border-right:none;border-bottom:1px solid var(--border)}
-  .detail{min-height:0}
-  .form-grid{grid-template-columns:1fr}
+  .side-toggle{display:inline-flex;align-items:center}
   .slogan{display:none}
+  .form-grid{grid-template-columns:1fr}
+  .detail{min-height:0;flex:1}
+  .side{
+    display:none;
+    position:fixed;
+    top:52px;left:0;right:0;
+    width:100%;
+    height:70vh;max-height:70vh;
+    border-right:none;
+    border-bottom:1px solid var(--border);
+    z-index:60;
+    box-shadow:0 16px 48px rgba(0,0,0,.4);
+  }
+  body.side-open .side{display:flex}
+  .side-mask{position:fixed;inset:0;top:52px;background:rgba(0,0,0,.55);z-index:55}
+  body.side-open .side-mask{display:block}
 }
 </style>
 </head>
@@ -166,6 +184,7 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
   <span class="brand-badge">JIAOYIFU STUDIO</span>
   <h1>内容工作台</h1>
   <span class="slogan">本地目录 · 对话创作 · 多平台同步</span>
+  <button class="btn side-toggle" id="side-toggle" data-act="toggle-side" title="内容库">☰ 内容库</button>
   <div class="top-actions">
     <button class="btn" data-act="refresh">刷新</button>
     <a class="btn" href="/" target="_blank">打开 DSH 会话</a>
@@ -191,6 +210,7 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     </div>
   </section>
 </div>
+<div class="side-mask" id="side-mask" data-act="close-side"></div>
 <div class="foot">
   <span>内容根目录：<code id="root-path">~/.dsh/content</code></span>
   <span>发布铁律：自动发布只写草稿，公开动作留给人。</span>
@@ -523,7 +543,11 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
       html += '</div></div>';
       return html;
     }
-    html += '<h3>① 选择内容形式</h3>';
+    html += '<h3>① 选择内容形式 · 选定即开工</h3>';
+    html += '<p class="form-pick-note">选定后自动进入准备中，并展开制作动线</p>';
+    if (!form && item.status === 'preparing') {
+      html += '<p class="form-pick-note form-prep-hint">已进入准备中--选定形式即出现动作指引</p>';
+    }
     html += '<div class="form-grid">';
     html += '<button class="btn form-opt" data-act="set-form" data-form="xhs">📕 小红书贴片<span class="form-desc">文案+卡片图，jiaoyifu-xiaohongshu-content 产线</span></button>';
     html += '<button class="btn form-opt" data-act="set-form" data-form="gzh">📝 公众号长文<span class="form-desc">article.md，jiaoyifu-article 产线</span></button>';
@@ -755,6 +779,9 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     if (p && !ffmpegOk) html += '<div class="hint">本机没有 ffmpeg：brew install ffmpeg 后可合成（配音/字幕不受影响）。</div>';
     html += '<div class="vfoot">对话同样可触发：绑定本期后说「给这期配音、出字幕、合成成片」。素材图片放 materials/（按文件名序轮播），BGM 放 bgm/，没有素材则纯色底。</div>';
     html += '</div>';
+    if (item.files && String(item.files.storyboard || '').trim()) {
+      html += docHtml('storyboard.md', item.files.storyboard, '分镜表');
+    }
     if (!videoProbe) loadVideoProbe();
     return html;
   }
@@ -823,15 +850,23 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
   }
 
   // ---------- 动作 ----------
+  function closeSideDrawer() {
+    if (document.body.classList.contains('side-open')) document.body.classList.remove('side-open');
+  }
   function handleAct(act, elNode) {
-    if (act === 'open-item') openItem(elNode.getAttribute('data-slug'));
+    if (act === 'open-item') {
+      closeSideDrawer();
+      openItem(elNode.getAttribute('data-slug'));
+    }
     else if (act === 'tab') switchTab(elNode.getAttribute('data-tab'));
     else if (act === 'refresh') refreshAll();
     else if (act === 'new-item') createNew();
-    else if (act === 'from-task') openFromTaskModal();
+    else if (act === 'from-task') { closeSideDrawer(); openFromTaskModal(); }
     else if (act === 'close-from-task') closeFromTaskModal();
     else if (act === 'from-task-modal') { /* 点弹窗本体不关闭 */ }
     else if (act === 'harvest-task') harvestTask(elNode.getAttribute('data-id'));
+    else if (act === 'toggle-side') document.body.classList.toggle('side-open');
+    else if (act === 'close-side') closeSideDrawer();
     else if (act === 'change-form') {
       changingForm = true;
       renderDetail(currentTab);
@@ -841,7 +876,8 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
       var nextForm = elNode.getAttribute('data-form');
       if (nextForm !== 'xhs' && nextForm !== 'gzh' && nextForm !== 'video') return;
       changingForm = false;
-      postJson(PANEL_BASE + '/api/status', { slug: current.slug, form: nextForm }).then(function (d) {
+      var formBody = { slug: current.slug, form: nextForm, status: current.status === 'not_started' ? 'preparing' : current.status };
+      postJson(PANEL_BASE + '/api/status', formBody).then(function (d) {
         if (d && d.ok) { toast('已选择' + (FORM_LABELS[nextForm] || nextForm)); refreshAll() }
         else toast((d && d.error) || '保存形式失败');
       }).catch(function () { toast('保存形式失败') });
@@ -853,8 +889,12 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     else if (act === 'copy-path') { if (current) copyText(current.dir, '已复制目录路径') }
     else if (act === 'start-prep') {
       if (!current) return;
+      var noForm = !itemForm(current);
       postJson(PANEL_BASE + '/api/status', { slug: current.slug, status: 'preparing' }).then(function (d) {
-        if (d && d.ok) { toast('已进入准备中'); refreshAll() } else toast((d && d.error) || '操作失败');
+        if (d && d.ok) {
+          toast(noForm ? '已进入准备中。选定内容形式后即出现制作动线' : '已进入准备中');
+          refreshAll();
+        } else toast((d && d.error) || '操作失败');
       }).catch(function () { toast('操作失败') });
     }
     else if (act === 'save-platform') savePlatform(elNode.getAttribute('data-key'));

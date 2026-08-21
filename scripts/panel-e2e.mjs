@@ -10,7 +10,9 @@
  *
  * 流程：esbuild 把 plugins/jiaoyifu-studio/src/panel.ts 打到 /tmp →
  * 本地 node:http stub（前缀 /jiaoyifu/studio）→
- * playwright chromium.launch({ channel: 'chrome' }) 系统 Chrome，viewport 800x600。
+ * playwright chromium.launch({ channel: 'chrome' }) 系统 Chrome。
+ * 默认 viewport 800x600（窄于 900：侧栏抽屉收起，点列表前先开抽屉）；
+ * 窄视口指标 860x700 另开 context。
  */
 import { createRequire } from 'node:module'
 import { createServer } from 'node:http'
@@ -25,6 +27,7 @@ const TOOLING = join(REPO, '.tmp-tooling')
 const PANEL_SRC = join(REPO, 'plugins/jiaoyifu-studio/src/panel.ts')
 const PREFIX = '/jiaoyifu/studio'
 const VIEWPORT = { width: 800, height: 600 }
+const NARROW_VIEWPORT = { width: 860, height: 700 }
 const SCREEN_DIR = '/tmp'
 
 const require = createRequire(join(TOOLING, 'package.json'))
@@ -117,6 +120,13 @@ function buildFixtures() {
       title: 'A 未设形式',
       form: null,
       files: { topic: LONG_TOPIC },
+    }),
+    baseItem({
+      slug: 'ep-e-autoprep',
+      title: 'E 选形式即开工',
+      form: null,
+      status: 'not_started',
+      files: { topic: '未开工选题' },
     }),
     baseItem({
       slug: 'ep-b-xhs',
@@ -348,7 +358,24 @@ async function measureTabScroll(page, tab) {
   return { dump, measured }
 }
 
+async function ensureSideOpen(page) {
+  const hidden = await page.evaluate(() => {
+    const side = document.querySelector('.side')
+    return !side || getComputedStyle(side).display === 'none'
+  })
+  if (!hidden) return
+  const toggle = page.locator('#side-toggle')
+  if (!(await toggle.isVisible())) return
+  await toggle.click()
+  await page.waitForFunction(() => {
+    const side = document.querySelector('.side')
+    return side && getComputedStyle(side).display !== 'none'
+  })
+  await page.waitForTimeout(40)
+}
+
 async function openItem(page, slug) {
+  await ensureSideOpen(page)
   await page.click('.item[data-slug="' + slug + '"]')
   await page.waitForFunction((s) => {
     const el = document.querySelector('.dslug')
@@ -372,7 +399,8 @@ async function main() {
   const url = stub.origin + PREFIX
   console.log('e2e stub', url)
   await page.goto(url, { waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('#items .item')
+  await page.waitForSelector('#items .item', { state: 'attached' })
+  await page.waitForSelector('#tab-body')
 
   // ---- 滚动：期 d 五 Tab ----
   await openItem(page, 'ep-d-gzh')
@@ -398,10 +426,16 @@ async function main() {
   writeFileSync(join(SCREEN_DIR, 'jiaoyifu-studio-e2e-scroll-diag.json'), JSON.stringify(scrollReports, null, 2))
   console.log('scroll diag → /tmp/jiaoyifu-studio-e2e-scroll-diag.json')
 
-  // ---- 形式选择：期 a ----
+  // ---- 形式选择：期 a（preparing + 未设形式 → 开工提示） ----
   await openItem(page, 'ep-a-noform')
   const formPicker = await page.locator('#form-card [data-act="set-form"][data-form="xhs"]').count()
   record('form.picker-visible', formPicker > 0, 'xhs buttons=' + formPicker)
+  const prepHintText = await page.locator('#form-card').innerText().catch(() => '')
+  record(
+    'form.prep-hint',
+    prepHintText.indexOf('已进入准备中--选定形式即出现动作指引') >= 0,
+    prepHintText.replace(/\s+/g, ' ').slice(0, 220),
+  )
   if (formPicker > 0) {
     stub.statusPosts.length = 0
     await page.click('#form-card [data-act="set-form"][data-form="xhs"]')
@@ -416,6 +450,26 @@ async function main() {
     record('form.post-xhs', false, '无形式选择按钮（当前面板未实现）')
     record('form.flow-after-xhs', false, '无形式选择按钮')
     record('form.badge-after-xhs', false, '无形式选择按钮')
+  }
+
+  // ---- 选形式即开工：期 e not_started + 未设形式 ----
+  await openItem(page, 'ep-e-autoprep')
+  const autoPicker = await page.locator('#form-card [data-act="set-form"][data-form="xhs"]').count()
+  if (autoPicker > 0) {
+    stub.statusPosts.length = 0
+    await page.click('#form-card [data-act="set-form"][data-form="xhs"]')
+    await page.waitForSelector('#flow-card', { timeout: 4000 })
+    const autoPosted = stub.statusPosts.find((p) => p && p.slug === 'ep-e-autoprep' && p.form === 'xhs')
+    const autoFlow = await page.locator('#flow-card').count()
+    const autoPill = await page.locator('.dtitle-row .pill').first().innerText().catch(() => '')
+    const autoOk = Boolean(autoPosted && autoPosted.form === 'xhs' && autoPosted.status === 'preparing' && autoFlow > 0 && autoPill.indexOf('准备中') >= 0)
+    record(
+      'form.autoprep',
+      autoOk,
+      (autoPosted ? JSON.stringify(autoPosted) : 'stub 未收到 ep-e-autoprep form=xhs') + ' flow=' + autoFlow + ' pill=' + autoPill,
+    )
+  } else {
+    record('form.autoprep', false, '无形式选择按钮')
   }
 
   // ---- 动线：期 b xhs ----
@@ -481,7 +535,8 @@ async function main() {
   }
 
   // ---- 从任务弹窗 ----
-  await page.click('[data-act="from-task"]')
+  await ensureSideOpen(page)
+  await page.click('.side [data-act="from-task"]')
   await page.waitForSelector('#from-task-mask')
   const modalOpen = await page.locator('#from-task-mask .modal').count()
   record('modal.open', modalOpen > 0, 'modal=' + modalOpen)
@@ -491,6 +546,7 @@ async function main() {
   record('modal.close', modalClosed === 0, 'mask=' + modalClosed)
 
   // ---- 左侧列表可滚 ----
+  await ensureSideOpen(page)
   const listScroll = await page.evaluate(() => {
     const el = document.getElementById('items')
     if (!el) return { ok: false }
@@ -501,6 +557,66 @@ async function main() {
   })
   record('list.scroll', Boolean(listScroll.ok && listScroll.overflowed && listScroll.afterBy > 0), JSON.stringify(listScroll))
   await page.screenshot({ path: join(SCREEN_DIR, 'jiaoyifu-studio-e2e-list.png') })
+
+  // ---- 窄视口：侧栏抽屉 + 详情滚动区高度 ----
+  const nContext = await browser.newContext({ viewport: NARROW_VIEWPORT })
+  const nPage = await nContext.newPage()
+  await nPage.goto(url, { waitUntil: 'domcontentloaded' })
+  await nPage.waitForFunction(() => {
+    const el = document.querySelector('.dslug')
+    return el && el.textContent === 'ep-d-gzh'
+  })
+  await nPage.waitForSelector('#tab-body')
+  await nPage.waitForTimeout(80)
+  const nMeas = await nPage.evaluate(() => {
+    const el = document.getElementById('tab-body')
+    if (!el) return { ok: false }
+    el.scrollTop = 0
+    const clientH = el.clientHeight
+    const scrollH = el.scrollHeight
+    el.scrollBy(0, 400)
+    return { ok: true, clientH, scrollH, afterBy: el.scrollTop }
+  })
+  record(
+    'narrow.scroll',
+    Boolean(nMeas.ok && nMeas.clientH >= 280 && nMeas.afterBy > 0),
+    JSON.stringify(nMeas),
+  )
+  await nPage.screenshot({ path: join(SCREEN_DIR, 'jiaoyifu-studio-e2e-narrow.png') })
+
+  const sideSnap = () => nPage.evaluate(() => {
+    const side = document.querySelector('.side')
+    const body = document.getElementById('tab-body')
+    const cs = side ? getComputedStyle(side) : null
+    return {
+      sideDisplay: cs ? cs.display : 'missing',
+      sideH: side ? side.clientHeight : 0,
+      tabH: body ? body.clientHeight : 0,
+      open: document.body.classList.contains('side-open'),
+    }
+  })
+  const beforeDrawer = await sideSnap()
+  const toggleVisible = await nPage.locator('#side-toggle').isVisible()
+  if (toggleVisible) {
+    await nPage.click('#side-toggle')
+    await nPage.waitForTimeout(80)
+    const openedDrawer = await sideSnap()
+    await nPage.click('#side-toggle')
+    await nPage.waitForTimeout(80)
+    const closedDrawer = await sideSnap()
+    const drawerOk = beforeDrawer.sideDisplay === 'none'
+      && openedDrawer.sideDisplay !== 'none'
+      && openedDrawer.sideH > 0
+      && openedDrawer.open
+      && closedDrawer.sideDisplay === 'none'
+      && !closedDrawer.open
+      && closedDrawer.tabH >= 280
+      && Math.abs(closedDrawer.tabH - beforeDrawer.tabH) <= 8
+    record('narrow.drawer-toggle', drawerOk, JSON.stringify({ beforeDrawer, openedDrawer, closedDrawer }))
+  } else {
+    record('narrow.drawer-toggle', false, '顶栏无 ☰ 内容库按钮')
+  }
+  await nContext.close()
 
   await browser.close()
   await stub.close()
