@@ -536,16 +536,18 @@ async function main() {
     record('flow.xhs.copy-done', copyDone, '文案应就绪')
     record('flow.xhs.cover-todo', coverDone === false, '封面应待做 coverDone=' + coverDone)
     const joined = stageState.copyBtns.map((b) => b.copy).join('\n---\n')
-    const cmdOk = stageState.copyBtns.some((b) => String(b.copy).indexOf('/content ') >= 0 && String(b.copy).indexOf('jiaoyifu-xiaohongshu-content') >= 0)
+    const cmdOk = stageState.copyBtns.some((b) => String(b.copy).indexOf('content_bind') >= 0 && String(b.copy).indexOf('jiaoyifu-xiaohongshu-content') >= 0)
     record('flow.xhs.copy-cmd', cmdOk, 'cmds=' + joined.replace(/\n/g, ' | ').slice(0, 240))
     record('flow.xhs.chain-note', /asking|角色链|xiaohongshu/i.test(stageState.chain), stageState.chain.slice(0, 160))
     const topicPathB = '/tmp/studio-e2e/ep-b-xhs/topic.md'
-    const ctxB = stageState.copyBtns.find((b) => String(b.copy).indexOf('/content ') === 0) || stageState.copyBtns[0]
+    const ctxB = stageState.copyBtns.find((b) => String(b.copy).indexOf('content_bind') >= 0) || stageState.copyBtns[0]
     const copyB = ctxB ? String(ctxB.copy) : ''
-    const ctxBOk = copyB.indexOf('/content ') === 0
-      && copyB.indexOf(topicPathB) >= 0
+    const ctxBOk = copyB.indexOf('content_bind') >= 0
+      && copyB.indexOf('ep-b-xhs') >= 0
+      && copyB.indexOf('/topic.md') >= 0
       && copyB.indexOf('素材包') >= 0
       && copyB.indexOf('ISS-test-harvest') >= 0
+      && !copyB.startsWith('/content')
     record('flow.xhs.copy-cmd-context', ctxBOk, copyB.replace(/\n/g, ' | ').slice(0, 280))
   } else {
     record('flow.xhs.topic-todo', false, '无动线卡')
@@ -581,7 +583,7 @@ async function main() {
     const topicPathC = '/tmp/studio-e2e/ep-c-video/topic.md'
     const ctxCOk = copyC.length > 0 && copyC.every((c) => {
       const t = String(c)
-      return t.indexOf(topicPathC) >= 0 && t.indexOf('ISS-') < 0 && t.indexOf('/content ') === 0
+      return t.indexOf(topicPathC) >= 0 && t.indexOf('ISS-') < 0 && !t.startsWith('/content')
     })
     record('flow.video.copy-cmd-context', ctxCOk, JSON.stringify(copyC).slice(0, 280))
   } else {

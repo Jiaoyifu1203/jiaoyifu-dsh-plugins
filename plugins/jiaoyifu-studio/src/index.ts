@@ -565,7 +565,7 @@ export function apply(ctx: Context, config: Config): void {
     input: { hint: 'slug 或标题关键词（留空查看当前绑定；unbind 解绑）' },
     async handler(invocation: any) {
       const agentId = String(invocation?.agent?.id ?? '')
-      const raw = String(invocation?.rawInput ?? '').trim()
+      const raw = String(invocation?.rawInput ?? '').trim().split(/\r?\n/)[0].trim()
       if (raw.toLowerCase() === 'unbind') {
         if (agentId && binds[agentId]) {
           const old = binds[agentId]

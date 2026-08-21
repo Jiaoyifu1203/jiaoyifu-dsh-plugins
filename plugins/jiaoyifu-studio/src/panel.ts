@@ -592,7 +592,6 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
   }
   function flowCmd(item, form, key) {
     var slug = item && item.slug ? item.slug : '';
-    var head = '/content ' + slug;
     var line = '';
     if (key === 'topic') line = '帮我定这一期选题并写进 topic.md';
     else if (key === 'copy') line = '按 jiaoyifu-xiaohongshu-content 产线做这一期：先 asking(1A) 挖我的主观理解，再走 7 层角色链';
@@ -604,12 +603,11 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     else return '';
     var dir = String(item && item.dir ? item.dir : '');
     while (dir.length && dir.charAt(dir.length - 1) === '/') dir = dir.slice(0, -1);
-    var load = '先读素材包再开工：读取 ' + dir + '/topic.md（选题、任务背景、过程摘要、产出锚点、可讲故事点全在里面；若仍是占位，先和我确认选题方向再动笔）';
-    var out = head + '\\n' + load;
+    var load = '② 装上下文：读取 ' + dir + '/topic.md 素材包--选题、任务背景、过程摘要、产出锚点、可讲故事点全在里面；若仍是占位，先和我确认选题方向再动笔';
     if (item && item.sourceTask && item.sourceTask.length) {
-      out += '\\n本素材包收割自任务：' + item.sourceTask.join('、');
+      load += '（本素材包收割自任务：' + item.sourceTask.join('、') + '）';
     }
-    return out + '\\n' + line;
+    return '开工这一期内容（先做准备再动笔）：\\n① 绑定本期：调用 content_bind 工具，slug = "' + slug + '"\\n' + load + '\\n③ ' + line;
   }
   function pendingActionsHtml(item, form, stages) {
     var html = '';
