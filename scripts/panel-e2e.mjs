@@ -25,6 +25,7 @@ import { tmpdir } from 'node:os'
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const TOOLING = join(REPO, '.tmp-tooling')
 const PANEL_SRC = join(REPO, 'plugins/jiaoyifu-studio/src/panel.ts')
+const MEMORY_SRC = join(REPO, 'plugins/jiaoyifu-studio/src/memory.ts')
 const PREFIX = '/jiaoyifu/studio'
 const VIEWPORT = { width: 800, height: 600 }
 const NARROW_VIEWPORT = { width: 860, height: 700 }
@@ -134,6 +135,7 @@ function buildFixtures() {
       form: 'xhs',
       files: { topic: '', script: LONG_SCRIPT },
       hasCover: false,
+      sourceTask: ['ISS-test-harvest'],
     }),
     baseItem({
       slug: 'ep-c-video',
@@ -170,6 +172,19 @@ function bundlePanel() {
   )
   if (r.status !== 0) {
     throw new Error('esbuild panel.ts 失败：' + String(r.stderr || r.stdout || '').trim())
+  }
+  return outFile
+}
+
+function bundleMemory() {
+  const outFile = join(tmpdir(), 'jiaoyifu-studio-memory-e2e.mjs')
+  const r = spawnSync(
+    'npx',
+    ['--prefix', REPO, 'esbuild', MEMORY_SRC, '--bundle', '--format=esm', '--log-level=error', '--outfile=' + outFile],
+    { encoding: 'utf8', cwd: REPO },
+  )
+  if (r.status !== 0) {
+    throw new Error('esbuild memory.ts 失败：' + String(r.stderr || r.stdout || '').trim())
   }
   return outFile
 }
@@ -386,9 +401,29 @@ async function openItem(page, slug) {
 
 async function main() {
   if (!existsSync(PANEL_SRC)) throw new Error('缺少 ' + PANEL_SRC)
+  if (!existsSync(MEMORY_SRC)) throw new Error('缺少 ' + MEMORY_SRC)
   const bundled = bundlePanel()
   const mod = await import(pathToFileURL(bundled).href)
   if (!mod.PANEL_HTML || typeof mod.PANEL_HTML !== 'string') throw new Error('PANEL_HTML 导出缺失')
+
+  const memMod = await import(pathToFileURL(bundleMemory()).href)
+  const topicPad = 'T'.repeat(800)
+  const memPayload = memMod.buildInjectPayload({
+    meta: { title: '记忆注入测', slug: 'ep-mem', status: 'preparing', sourceTask: ['ISS-aaa', 'ISS-bbb'] },
+    dir: '/tmp/mem',
+    files: { topic: topicPad, script: '', article: '', subs: '' },
+  }, 4000)
+  record(
+    'memory.l1-source-task',
+    String(memPayload.l1).indexOf('来源任务：ISS-aaa、ISS-bbb') >= 0,
+    String(memPayload.l1).slice(0, 220),
+  )
+  const topicPreview = String(memPayload.l1).split('\n').pop() || ''
+  record(
+    'memory.l1-topic-600',
+    memMod.L1_TOPIC_CHARS === 600 && topicPreview.length === 600,
+    'L1_TOPIC_CHARS=' + memMod.L1_TOPIC_CHARS + ' topicPreview=' + topicPreview.length,
+  )
 
   const fixtures = buildFixtures()
   const stub = await startStub(mod.PANEL_HTML, fixtures)
@@ -504,12 +539,21 @@ async function main() {
     const cmdOk = stageState.copyBtns.some((b) => String(b.copy).indexOf('/content ') >= 0 && String(b.copy).indexOf('jiaoyifu-xiaohongshu-content') >= 0)
     record('flow.xhs.copy-cmd', cmdOk, 'cmds=' + joined.replace(/\n/g, ' | ').slice(0, 240))
     record('flow.xhs.chain-note', /asking|角色链|xiaohongshu/i.test(stageState.chain), stageState.chain.slice(0, 160))
+    const topicPathB = '/tmp/studio-e2e/ep-b-xhs/topic.md'
+    const ctxB = stageState.copyBtns.find((b) => String(b.copy).indexOf('/content ') === 0) || stageState.copyBtns[0]
+    const copyB = ctxB ? String(ctxB.copy) : ''
+    const ctxBOk = copyB.indexOf('/content ') === 0
+      && copyB.indexOf(topicPathB) >= 0
+      && copyB.indexOf('素材包') >= 0
+      && copyB.indexOf('ISS-test-harvest') >= 0
+    record('flow.xhs.copy-cmd-context', ctxBOk, copyB.replace(/\n/g, ' | ').slice(0, 280))
   } else {
     record('flow.xhs.topic-todo', false, '无动线卡')
     record('flow.xhs.copy-done', false, '无动线卡')
     record('flow.xhs.cover-todo', false, '无动线卡')
     record('flow.xhs.copy-cmd', false, '无动线卡')
     record('flow.xhs.chain-note', false, '无动线卡')
+    record('flow.xhs.copy-cmd-context', false, '无动线卡')
   }
 
   // ---- 动线：期 c video 四阶段点亮 ----
@@ -529,9 +573,21 @@ async function main() {
     record('flow.video.four-lit', lit, JSON.stringify(videoStages))
     const packTodo = await page.locator('#flow-card [data-todo="pack"]').count()
     record('flow.video.pack-todo', packTodo > 0, '发布包待做=' + packTodo)
+    const copyC = await page.evaluate(() => {
+      const card = document.getElementById('flow-card')
+      if (!card) return []
+      return Array.from(card.querySelectorAll('[data-act="copy-flow"]')).map((el) => el.getAttribute('data-copy') || '')
+    })
+    const topicPathC = '/tmp/studio-e2e/ep-c-video/topic.md'
+    const ctxCOk = copyC.length > 0 && copyC.every((c) => {
+      const t = String(c)
+      return t.indexOf(topicPathC) >= 0 && t.indexOf('ISS-') < 0 && t.indexOf('/content ') === 0
+    })
+    record('flow.video.copy-cmd-context', ctxCOk, JSON.stringify(copyC).slice(0, 280))
   } else {
     record('flow.video.four-lit', false, '无动线卡')
     record('flow.video.pack-todo', false, '无动线卡')
+    record('flow.video.copy-cmd-context', false, '无动线卡')
   }
 
   // ---- 从任务弹窗 ----

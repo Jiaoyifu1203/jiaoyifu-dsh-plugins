@@ -8,7 +8,7 @@
 
 export const MEMORY_KEEP = 8
 export const MEMORY_INJECT = 3
-export const L1_TOPIC_CHARS = 200
+export const L1_TOPIC_CHARS = 600
 export const QC_LINE_MAX = 120
 
 export const LAYER_RATIOS = { l1: 0.45, l2: 0.35, l3: 0.2 } as const
@@ -43,6 +43,7 @@ export interface InjectEpisode {
     memory?: MemoryEntry[]
     qc?: QcInfo
     publish?: Partial<Record<string, { pack?: string }>>
+    sourceTask?: string[]
   }
   dir: string
   files: InjectFiles
@@ -146,7 +147,9 @@ function buildL1(ep: InjectEpisode, budget: number): string {
   const title = `《${ep.meta.title}》`
   const topic = String(ep.files.topic ?? '').trim()
   const topicHead = clip(topic, L1_TOPIC_CHARS)
-  const head = `### L1 选题\n${title}`
+  const ids = (ep.meta.sourceTask ?? []).map((id) => String(id).trim()).filter(Boolean)
+  const source = ids.length ? `\n来源任务：${ids.join('、')}` : ''
+  const head = `### L1 选题\n${title}${source}`
   if (head.length >= budget) return head
   const rest = topicHead ? `\n${topicHead}` : ''
   return head + clip(rest, budget - head.length)

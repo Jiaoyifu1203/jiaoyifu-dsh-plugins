@@ -590,7 +590,8 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     if (form === 'gzh') return '全链：asking(1A)-&gt;6角色链(MrBeast/塔勒布/罗永浩/呼兰/马伯庸/原研哉)+DNA卡-&gt;asking(M2)-&gt;jiaoyifu-article 生产 article.md-&gt;配图-&gt;发布';
     return '全链：jiaoyifu-video-script-forge 写 script.md-&gt;面板视频产线(配音-&gt;字幕-&gt;分镜-&gt;合成)-&gt;publish_pack 发布包';
   }
-  function flowCmd(slug, form, key) {
+  function flowCmd(item, form, key) {
+    var slug = item && item.slug ? item.slug : '';
     var head = '/content ' + slug;
     var line = '';
     if (key === 'topic') line = '帮我定这一期选题并写进 topic.md';
@@ -601,7 +602,14 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
     else if (key === 'cover' && form === 'gzh') line = '按 jiaoyifu-article 产线给这一期配图，写进本期 cover.*';
     else if (key === 'pack') line = '按 publish_pack 给这一期生成发布包（只出草稿，不点发布）';
     else return '';
-    return head + '\\n' + line;
+    var dir = String(item && item.dir ? item.dir : '');
+    while (dir.length && dir.charAt(dir.length - 1) === '/') dir = dir.slice(0, -1);
+    var load = '先读素材包再开工：读取 ' + dir + '/topic.md（选题、任务背景、过程摘要、产出锚点、可讲故事点全在里面；若仍是占位，先和我确认选题方向再动笔）';
+    var out = head + '\\n' + load;
+    if (item && item.sourceTask && item.sourceTask.length) {
+      out += '\\n本素材包收割自任务：' + item.sourceTask.join('、');
+    }
+    return out + '\\n' + line;
   }
   function pendingActionsHtml(item, form, stages) {
     var html = '';
@@ -615,13 +623,13 @@ video{width:100%;max-height:62vh;border-radius:12px;background:#000;border:1px s
         html += '<span class="todo-hint">面板内完成配音/字幕/分镜/合成</span>';
       } else if (s.key === 'pack') {
         html += '<span class="todo-hint">用概览下方「生成发布包」按钮；只出草稿，不点发布</span>';
-        var cmdP = flowCmd(item.slug, form, 'pack');
+        var cmdP = flowCmd(item, form, 'pack');
         if (cmdP) {
           html += '<button class="btn small" data-act="copy-flow" data-copy="' + esc(cmdP) + '">复制 DSH 指令</button>';
           html += '<span class="todo-hint">粘贴到 DSH 会话即开干</span>';
         }
       } else {
-        var cmd = flowCmd(item.slug, form, s.key);
+        var cmd = flowCmd(item, form, s.key);
         if (cmd) {
           html += '<button class="btn small primary" data-act="copy-flow" data-copy="' + esc(cmd) + '">复制 DSH 指令</button>';
           html += '<span class="todo-hint">粘贴到 DSH 会话即开干</span>';
